@@ -1,0 +1,10 @@
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Aplicația are nevoie de Bluetooth pentru a primi datele de la senzorul EKG.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>Aplicația are nevoie de Bluetooth pentru a comunica cu senzorul ApexCardio.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Accesul la locație este necesar pentru scanarea dispozitivelor BLE.</string>
+<key>UIFileSharingEnabled</key>
+<true/>
+<key>LSSupportsOpeningDocumentsInPlace</key>
+<true/>
