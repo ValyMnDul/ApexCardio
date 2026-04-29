@@ -109,15 +109,28 @@ class _MonitorScreenState extends State<MonitorScreen> {
       List<BluetoothService> services = await widget.device.discoverServices();
       for (var service in services) {
         for (var char in service.characteristics) {
+          // Căutăm caracteristica care are NOTIFY activat
           if (char.properties.notify) {
             targetChar = char;
             await char.setNotifyValue(true);
+
             char.lastValueStream.listen((value) {
               if (value.isNotEmpty) {
-                String raw = utf8.decode(value);
-                double? val = double.tryParse(raw);
-                if (val != null) {
-                  _updateData(val);
+                try {
+                  // Decodăm și curățăm spațiile/liniile noi
+                  String raw = utf8.decode(value).trim();
+
+                  // Dacă ESP32 trimite mai multe valori lipite, luăm doar prima
+                  if (raw.contains('\n')) {
+                    raw = raw.split('\n').first.trim();
+                  }
+
+                  double? val = double.tryParse(raw);
+                  if (val != null) {
+                    _updateData(val);
+                  }
+                } catch (e) {
+                  debugPrint("Eroare la parsare date brute: $e");
                 }
               }
             });
@@ -139,14 +152,21 @@ class _MonitorScreenState extends State<MonitorScreen> {
         if (isRecording) {
           csvBuffer.add("${DateFormat('HH:mm:ss.SSS').format(now)},$val");
         }
-        if (dataPoints.length > 150) {
+        // Păstrăm doar ultimele 50 de puncte pentru performanță (previne crash-ul)
+        if (dataPoints.length > 50) {
           dataPoints.removeAt(0);
         }
       });
-      _chartSeriesController?.updateDataSource(
-        addedDataIndex: dataPoints.length - 1,
-        removedDataIndex: 0,
-      );
+
+      // Actualizăm graficul doar dacă există controller-ul
+      try {
+        _chartSeriesController?.updateDataSource(
+          addedDataIndex: dataPoints.length - 1,
+          removedDataIndex: dataPoints.length > 50 ? 0 : -1,
+        );
+      } catch (e) {
+        debugPrint("Eroare update grafic: $e");
+      }
     }
   }
 
