@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:syncfusion_flutter_charts/charts.dart';
+import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:syncfusion_flutter_charts/charts.dart';
+import 'package:syncfusion_flutter_core/core.dart';
 
 void main() => runApp(const MyApp());
 
@@ -28,7 +30,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ============= MODELS =============
 class EkgData {
   EkgData(this.time, this.value);
   final DateTime time;
@@ -44,7 +45,7 @@ class RecordingSession {
   double maxValue = 0.0;
   double avgValue = 0.0;
   int beatCount = 0;
-  List<EkgData> data = [];
+  final List<EkgData> data = [];
 
   RecordingSession({
     required this.id,
@@ -73,11 +74,10 @@ class RecordingSession {
   int _estimateBeatCount() {
     if (data.length < 3) return 0;
 
-    // Use a simple threshold-based peak detection with refractory period
     final values = data.map((e) => e.value).toList();
     final mean = values.reduce((a, b) => a + b) / values.length;
     final maxv = values.reduce((a, b) => a > b ? a : b);
-    final threshold = mean + (maxv - mean) * 0.5; // spike threshold
+    final threshold = mean + (maxv - mean) * 0.5;
 
     int count = 0;
     DateTime? lastPeak;
@@ -96,7 +96,6 @@ class RecordingSession {
   }
 }
 
-// ============= SCAN SCREEN =============
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
 
@@ -117,9 +116,6 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void startScan() async {
     if (Platform.isLinux) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Bluetooth is not supported on Linux")),
-      );
       return;
     }
 
@@ -145,7 +141,7 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("ApexCardio - Selectare Dispozitiv"),
+        title: const Text('ApexCardio - Selectare Dispozitiv'),
         elevation: 0,
       ),
       body: scanResults.isEmpty
@@ -159,7 +155,7 @@ class _ScanScreenState extends State<ScanScreen> {
                     const Icon(Icons.search_off, size: 80, color: Colors.grey),
                   const SizedBox(height: 20),
                   Text(
-                    isScanning ? "Searching devices..." : "No devices found",
+                    isScanning ? 'Searching devices...' : 'No devices found',
                     style: const TextStyle(fontSize: 18),
                   ),
                 ],
@@ -172,7 +168,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 child: ListTile(
                   leading: const Icon(Icons.bluetooth, color: Colors.cyan),
                   title: Text(scanResults[i].device.platformName.isEmpty
-                      ? "Dispozitiv necunoscut"
+                      ? 'Dispozitiv necunoscut'
                       : scanResults[i].device.platformName),
                   subtitle: Text(scanResults[i].device.remoteId.toString()),
                   trailing: const Icon(Icons.arrow_forward_ios),
@@ -192,14 +188,13 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: startScan,
-        label: const Text("Rescan"),
+        label: const Text('Rescan'),
         icon: const Icon(Icons.refresh),
       ),
     );
   }
 }
 
-// ============= MONITOR SCREEN =============
 class MonitorScreen extends StatefulWidget {
   final BluetoothDevice device;
   const MonitorScreen({super.key, required this.device});
@@ -225,7 +220,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   bool isRecording = false;
   RecordingSession? currentSession;
   DateTime? recordingStart;
-  // simple settings
   String language = 'en';
   double fontScale = 1.0;
   bool isDarkMode = true;
@@ -246,7 +240,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-
     setState(() {
       language = prefs.getString(_prefLanguageKey) ?? language;
       fontScale = prefs.getDouble(_prefFontScaleKey) ?? fontScale;
@@ -264,28 +257,6 @@ class _MonitorScreenState extends State<MonitorScreen>
     await prefs.setBool(_prefDarkModeKey, isDarkMode);
     await prefs.setInt(_prefLiveWindowPointsKey, liveWindowPoints);
     await prefs.setDouble(_prefYAxisMaxKey, yAxisMax);
-  }
-
-  void _setLiveWindowPoints(int value) {
-    int removedCount = 0;
-
-    setState(() {
-      liveWindowPoints = value;
-      if (dataPoints.length > liveWindowPoints) {
-        removedCount = dataPoints.length - liveWindowPoints;
-        dataPoints = dataPoints.sublist(removedCount);
-      }
-    });
-
-    if (removedCount > 0) {
-      try {
-        _chartSeriesController?.updateDataSource(
-          removedDataIndexes: List<int>.generate(removedCount, (i) => i),
-        );
-      } catch (e) {
-        debugPrint("Error shrinking chart window: $e");
-      }
-    }
   }
 
   Future<void> loadSessions() async {
@@ -324,7 +295,6 @@ class _MonitorScreenState extends State<MonitorScreen>
       final filename = file.path.split('/').last;
       final parts =
           filename.replaceAll('ekg_', '').replaceAll('.csv', '').split('_');
-
       if (parts.length < 2) return null;
 
       final startTime =
@@ -338,13 +308,39 @@ class _MonitorScreenState extends State<MonitorScreen>
         filePath: file.path,
       );
 
+      DateTime? previousPointTime;
       for (var i = 1; i < lines.length; i++) {
-        final parts = lines[i].split(',');
-        if (parts.length == 2) {
+        final row = lines[i].split(',');
+        if (row.length >= 2) {
           try {
-            final value = double.parse(parts[1]);
-            session.data.add(EkgData(startTime, value));
-          } catch (e) {
+            DateTime pointTime;
+            double value;
+
+            if (row.length >= 3 && int.tryParse(row[0]) != null) {
+              final elapsedMs = int.parse(row[0]);
+              pointTime = startTime.add(Duration(milliseconds: elapsedMs));
+              value = double.parse(row[2]);
+            } else {
+              value = double.parse(row[1]);
+              final parsedTime = DateFormat('HH:mm:ss.SSS').parse(row[0]);
+              pointTime = DateTime(
+                startTime.year,
+                startTime.month,
+                startTime.day,
+                parsedTime.hour,
+                parsedTime.minute,
+                parsedTime.second,
+                parsedTime.millisecond,
+              );
+              if (previousPointTime != null &&
+                  pointTime.isBefore(previousPointTime)) {
+                pointTime = pointTime.add(const Duration(days: 1));
+              }
+            }
+
+            previousPointTime = pointTime;
+            session.data.add(EkgData(pointTime, value));
+          } catch (_) {
             continue;
           }
         }
@@ -353,7 +349,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       session.calculateStats();
       return session;
     } catch (e) {
-      debugPrint("Error loading session: $e");
+      debugPrint('Error loading session: $e');
       return null;
     }
   }
@@ -361,7 +357,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   void connectToDevice() async {
     try {
       await widget.device.connect();
-      List<BluetoothService> services = await widget.device.discoverServices();
+      final services = await widget.device.discoverServices();
       for (var service in services) {
         for (var char in service.characteristics) {
           if (char.properties.notify) {
@@ -375,12 +371,12 @@ class _MonitorScreenState extends State<MonitorScreen>
                   if (raw.contains('\n')) {
                     raw = raw.split('\n').first.trim();
                   }
-                  double? val = double.tryParse(raw);
+                  final val = double.tryParse(raw);
                   if (val != null) {
                     _updateData(val);
                   }
                 } catch (e) {
-                  debugPrint("Error parsing: $e");
+                  debugPrint('Error parsing: $e');
                 }
               }
             });
@@ -388,12 +384,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         }
       }
     } catch (e) {
-      debugPrint("Error connecting: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Connection error: $e")),
-        );
-      }
+      debugPrint('Error connecting: $e');
     }
   }
 
@@ -420,7 +411,30 @@ class _MonitorScreenState extends State<MonitorScreen>
           removedDataIndex: removedOldest ? 0 : -1,
         );
       } catch (e) {
-        debugPrint("Error updating chart: $e");
+        debugPrint('Error updating chart: $e');
+      }
+    }
+  }
+
+  void _setLiveWindowPoints(int value) {
+    final clamped = value.clamp(1, 1000000);
+    int removedCount = 0;
+
+    setState(() {
+      liveWindowPoints = clamped;
+      if (dataPoints.length > liveWindowPoints) {
+        removedCount = dataPoints.length - liveWindowPoints;
+        dataPoints = dataPoints.sublist(removedCount);
+      }
+    });
+
+    if (removedCount > 0) {
+      try {
+        _chartSeriesController?.updateDataSource(
+          removedDataIndexes: List<int>.generate(removedCount, (i) => i),
+        );
+      } catch (e) {
+        debugPrint('Error shrinking chart window: $e');
       }
     }
   }
@@ -456,10 +470,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     currentSession!.filePath = filePath;
 
     final file = File(filePath);
-    final csvLines = ['Time,Voltage'];
+    final csvLines = ['ElapsedMs,Time,Voltage'];
     for (var data in currentSession!.data) {
-      csvLines
-          .add('${DateFormat('HH:mm:ss.SSS').format(data.time)},${data.value}');
+      final elapsedMs = data.time.difference(recordingStart!).inMilliseconds;
+      csvLines.add(
+          '$elapsedMs,${DateFormat('HH:mm:ss.SSS').format(data.time)},${data.value}');
     }
     await file.writeAsString(csvLines.join('\n'));
 
@@ -483,19 +498,13 @@ class _MonitorScreenState extends State<MonitorScreen>
         sessions.removeWhere((s) => s.id == session.id);
       });
     }
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Recording deleted")),
-    );
   }
 
   Future<void> shareSession(RecordingSession session) async {
     await Share.shareXFiles(
       [XFile(session.filePath)],
       text:
-          "ApexCardio EKG Session - ${DateFormat('dd.MM.yyyy HH:mm').format(session.startTime)}",
+          'ApexCardio EKG Session - ${DateFormat('dd.MM.yyyy HH:mm').format(session.startTime)}',
     );
   }
 
@@ -505,7 +514,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       targetChar?.setNotifyValue(false);
       widget.device.disconnect();
     } catch (e) {
-      debugPrint("Error during disconnect: $e");
+      debugPrint('Error during disconnect: $e');
     }
     _tabController.dispose();
     super.dispose();
@@ -531,7 +540,7 @@ class _MonitorScreenState extends State<MonitorScreen>
           child: Scaffold(
             appBar: AppBar(
               title: Text(widget.device.platformName.isEmpty
-                  ? "ApexCardio"
+                  ? 'ApexCardio'
                   : widget.device.platformName),
               actions: [
                 if (isRecording && currentSession != null)
@@ -545,7 +554,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                           stream: Stream.periodic(
                               const Duration(milliseconds: 200)),
                           builder: (c, s) => Text(
-                            "${t('Recording', 'Înregistrare')} ${currentSession == null ? '' : '${DateTime.now().difference(currentSession!.startTime).inSeconds}s'}",
+                            '${t('Recording', 'Înregistrare')} ${currentSession == null ? '' : '${DateTime.now().difference(currentSession!.startTime).inSeconds}s'}',
                             style: const TextStyle(color: Colors.red),
                           ),
                         ),
@@ -558,13 +567,13 @@ class _MonitorScreenState extends State<MonitorScreen>
                 tabs: [
                   Tab(
                       icon: const Icon(Icons.show_chart),
-                      text: t("Live", "Live")),
+                      text: t('Live', 'Live')),
                   Tab(
                       icon: const Icon(Icons.history),
-                      text: t("Recordings", "Înregistrări")),
+                      text: t('Recordings', 'Înregistrări')),
                   Tab(
                       icon: const Icon(Icons.settings),
-                      text: t("Settings", "Setări")),
+                      text: t('Settings', 'Setări')),
                 ],
               ),
             ),
@@ -587,16 +596,16 @@ class _MonitorScreenState extends State<MonitorScreen>
       final confirm = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
-          title: const Text("Active recording"),
-          content: const Text("Do you want to stop recording before leaving?"),
+          title: const Text('Active recording'),
+          content: const Text('Do you want to stop recording before leaving?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(c, false),
-              child: const Text("No"),
+              child: const Text('No'),
             ),
             TextButton(
               onPressed: () => Navigator.pop(c, true),
-              child: const Text("Yes, stop"),
+              child: const Text('Yes, stop'),
             ),
           ],
         ),
@@ -605,17 +614,13 @@ class _MonitorScreenState extends State<MonitorScreen>
       if (confirm == true) {
         stopRecording();
         await widget.device.disconnect();
-        if (mounted) {
-          Navigator.pop(context);
-        }
+        if (mounted) Navigator.pop(context);
       }
       return;
     }
 
     await widget.device.disconnect();
-    if (mounted) {
-      Navigator.pop(context);
-    }
+    if (mounted) Navigator.pop(context);
   }
 
   Widget _buildSettingsTab() {
@@ -623,7 +628,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          t("Settings", "Setări"),
+          t('Settings', 'Setări'),
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 12),
@@ -636,12 +641,10 @@ class _MonitorScreenState extends State<MonitorScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  t("Display", "Afișare"),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
+                Text(t('Display', 'Afișare'),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
-                Text(t("Language", "Limbă")),
+                Text(t('Language', 'Limbă')),
                 const SizedBox(height: 6),
                 DropdownButton<String>(
                   isExpanded: true,
@@ -658,7 +661,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                   },
                 ),
                 const SizedBox(height: 12),
-                Text(t("Font scale", "Mărime font")),
+                Text(t('Font scale', 'Mărime font')),
                 Slider(
                   value: fontScale,
                   min: 0.8,
@@ -671,7 +674,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                 const SizedBox(height: 4),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(t("Dark mode", "Mod întunecat")),
+                  title: Text(t('Dark mode', 'Mod întunecat')),
                   value: isDarkMode,
                   onChanged: (v) {
                     setState(() => isDarkMode = v);
@@ -692,16 +695,14 @@ class _MonitorScreenState extends State<MonitorScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  t("Chart", "Grafic"),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
+                Text(t('Chart', 'Grafic'),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 _buildInfoSettingLabel(
-                  title: t("Live points window", "Fereastră puncte live"),
+                  title: t('Live points window', 'Fereastră puncte live'),
                   infoMessage: t(
-                    "Shows how many recent points stay visible in Live chart.",
-                    "Arată câte puncte recente rămân vizibile în graficul Live.",
+                    'Shows how many recent points stay visible in Live chart.',
+                    'Arată câte puncte recente rămân vizibile în graficul Live.',
                   ),
                 ),
                 Slider(
@@ -715,10 +716,10 @@ class _MonitorScreenState extends State<MonitorScreen>
                 ),
                 const SizedBox(height: 8),
                 _buildInfoSettingLabel(
-                  title: t("Chart max value", "Valoare maximă grafic"),
+                  title: t('Chart max value', 'Valoare maximă grafic'),
                   infoMessage: t(
-                    "Sets the fixed maximum value on chart Y axis.",
-                    "Setează valoarea maximă fixă pe axa Y a graficului.",
+                    'Sets the fixed maximum value on chart Y axis.',
+                    'Setează valoarea maximă fixă pe axa Y a graficului.',
                   ),
                 ),
                 Slider(
@@ -762,7 +763,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text(t("OK", "OK")),
+                      child: Text(t('OK', 'OK')),
                     ),
                   ],
                 ),
@@ -812,7 +813,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                       animationDuration: 0,
                       color: Colors.cyanAccent,
                       width: 2,
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -834,8 +835,6 @@ class _MonitorScreenState extends State<MonitorScreen>
           ),
           child: Column(
             children: [
-              if (isRecording && currentSession != null)
-                const SizedBox.shrink(),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -856,8 +855,8 @@ class _MonitorScreenState extends State<MonitorScreen>
                     icon: Icon(
                         isRecording ? Icons.stop : Icons.fiber_manual_record),
                     label: Text(isRecording
-                        ? t("Stop Recording", "Stop Înregistrare")
-                        : t("Start Recording", "Start Înregistrare")),
+                        ? t('Stop Recording', 'Stop Înregistrare')
+                        : t('Start Recording', 'Start Înregistrare')),
                   ),
                 ],
               ),
@@ -877,7 +876,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                 Icon(Icons.history, size: 80, color: Colors.grey[600]),
                 const SizedBox(height: 16),
                 Text(
-                  t("No recordings yet", "Nicio înregistrare încă"),
+                  t('No recordings yet', 'Nicio înregistrare încă'),
                   style: const TextStyle(fontSize: 18, color: Colors.grey),
                 ),
               ],
@@ -900,7 +899,7 @@ class _MonitorScreenState extends State<MonitorScreen>
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
-          "${t('Duration', 'Durată')}: ${session.duration.inSeconds}s | ${t('Samples', 'Puncte')}: ${session.data.length}",
+          '${t('Duration', 'Durată')}: ${session.duration.inSeconds}s | ${t('Samples', 'Puncte')}: ${session.data.length}',
         ),
         children: [
           Padding(
@@ -908,24 +907,25 @@ class _MonitorScreenState extends State<MonitorScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildStatRow(t("Min", "Min"),
-                    "${session.minValue.toStringAsFixed(0)} mV"),
-                _buildStatRow(t("Max", "Max"),
-                    "${session.maxValue.toStringAsFixed(0)} mV"),
-                _buildStatRow(t("Avg", "Medie"),
-                    "${session.avgValue.toStringAsFixed(0)} mV"),
+                _buildStatRow(t('Min', 'Min'),
+                    '${session.minValue.toStringAsFixed(0)} mV'),
+                _buildStatRow(t('Max', 'Max'),
+                    '${session.maxValue.toStringAsFixed(0)} mV'),
+                _buildStatRow(t('Avg', 'Medie'),
+                    '${session.avgValue.toStringAsFixed(0)} mV'),
                 _buildStatRow(
-                    t("Estimated beats", "Bătăi estimate"),
-                    session.duration.inSeconds < 60
-                        ? "-"
-                        : "${session.beatCount}"),
+                  t('Estimated beats', 'Bătăi estimate'),
+                  session.duration.inSeconds < 60
+                      ? '-'
+                      : '${session.beatCount}',
+                ),
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     ElevatedButton.icon(
                       icon: const Icon(Icons.preview),
-                      label: Text(t("View", "Vizualizare")),
+                      label: Text(t('View', 'Vizualizare')),
                       onPressed: () => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -940,15 +940,14 @@ class _MonitorScreenState extends State<MonitorScreen>
                     ),
                     ElevatedButton.icon(
                       icon: const Icon(Icons.share),
-                      label: Text(t("Export", "Export")),
+                      label: Text(t('Export', 'Export')),
                       onPressed: () => shareSession(session),
                     ),
                     ElevatedButton.icon(
                       icon: const Icon(Icons.delete),
-                      label: Text(t("Delete", "Șterge")),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                      ),
+                      label: Text(t('Delete', 'Șterge')),
+                      style:
+                          ElevatedButton.styleFrom(backgroundColor: Colors.red),
                       onPressed: () => deleteSession(session),
                     ),
                   ],
@@ -977,8 +976,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 }
 
-// ============= DETAIL SCREEN =============
-class DetailScreen extends StatelessWidget {
+class DetailScreen extends StatefulWidget {
   final RecordingSession session;
   final String language;
   final double fontScale;
@@ -992,69 +990,509 @@ class DetailScreen extends StatelessWidget {
     required this.isDarkMode,
   });
 
-  String t(String en, String ro) => language == 'ro' ? ro : en;
+  @override
+  State<DetailScreen> createState() => _DetailScreenState();
+}
+
+class _DetailScreenState extends State<DetailScreen> {
+  late DateTime rangeStartTime;
+  late DateTime rangeEndTime;
+  late final RangeController _rangeController;
+  late final ZoomPanBehavior _zoomPanBehavior;
+  bool _isSyncingFromCode = false;
+
+  bool get _hasData => widget.session.data.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_hasData) {
+      rangeStartTime = widget.session.data.first.time;
+      rangeEndTime = widget.session.data.last.time;
+    } else {
+      rangeStartTime = DateTime.now();
+      rangeEndTime = DateTime.now();
+    }
+    _rangeController = RangeController(
+      start: rangeStartTime,
+      end: rangeEndTime,
+    );
+    _zoomPanBehavior = ZoomPanBehavior(
+      enablePinching: true,
+      enablePanning: true,
+      zoomMode: ZoomMode.x,
+    );
+  }
+
+  String t(String en, String ro) => widget.language == 'ro' ? ro : en;
+
+  int get _lastIndex => widget.session.data.length - 1;
+
+  int _clampIndex(int index) => index.clamp(0, _lastIndex);
+
+  int _findFirstIndexAtOrAfter(DateTime time) {
+    int low = 0;
+    int high = _lastIndex;
+    while (low <= high) {
+      final int mid = (low + high) >> 1;
+      final current = widget.session.data[mid].time;
+      if (current.isBefore(time)) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return _clampIndex(low);
+  }
+
+  int _findLastIndexAtOrBefore(DateTime time) {
+    int low = 0;
+    int high = _lastIndex;
+    while (low <= high) {
+      final int mid = (low + high) >> 1;
+      final current = widget.session.data[mid].time;
+      if (current.isAfter(time)) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return _clampIndex(high);
+  }
+
+  List<EkgData> _getVisibleData() {
+    if (!_hasData) return <EkgData>[];
+    final startIndex = _findFirstIndexAtOrAfter(rangeStartTime);
+    final endIndex = _findLastIndexAtOrBefore(rangeEndTime);
+    if (endIndex < startIndex) return <EkgData>[];
+    return widget.session.data.sublist(startIndex, endIndex + 1);
+  }
+
+  Map<String, double> _calculateRangeStats() {
+    final visibleData = _getVisibleData();
+    if (visibleData.isEmpty) {
+      return {'min': 0.0, 'max': 0.0, 'avg': 0.0};
+    }
+    final values = visibleData.map((e) => e.value).toList();
+    final min = values.reduce((a, b) => a < b ? a : b);
+    final max = values.reduce((a, b) => a > b ? a : b);
+    final avg = values.reduce((a, b) => a + b) / values.length;
+    return {'min': min, 'max': max, 'avg': avg};
+  }
+
+  Duration get _rangeDuration => rangeEndTime.difference(rangeStartTime);
+
+  double get _totalDurationSeconds {
+    if (!_hasData) return 1;
+    final totalSeconds = widget.session.data.last.time
+        .difference(widget.session.data.first.time)
+        .inSeconds;
+    return totalSeconds <= 0 ? 1 : totalSeconds.toDouble();
+  }
+
+  Duration _offsetFromStart(DateTime time) =>
+      time.difference(widget.session.startTime);
+
+  DateTime _timeFromOffset(Duration offset) {
+    final candidate = widget.session.startTime.add(offset);
+    final first = widget.session.data.first.time;
+    final last = widget.session.data.last.time;
+    if (candidate.isBefore(first)) return first;
+    if (candidate.isAfter(last)) return last;
+    return candidate;
+  }
+
+  String _formatOffset(Duration offset) {
+    final clamped = offset.isNegative ? Duration.zero : offset;
+    final hours = clamped.inHours;
+    final minutes = clamped.inMinutes.remainder(60);
+    final seconds = clamped.inSeconds.remainder(60);
+    return '+${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDuration(Duration duration) {
+    final days = duration.inDays;
+    final hours = duration.inHours.remainder(24);
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    final parts = <String>[];
+    if (days > 0) parts.add('${days}d');
+    if (hours > 0 || days > 0) parts.add('${hours}h');
+    if (minutes > 0 || hours > 0 || days > 0) parts.add('${minutes}m');
+    parts.add('${seconds}s');
+    return parts.join(' ');
+  }
+
+  void _syncRange(DateTime start, DateTime end) {
+    if (start.isAfter(end)) {
+      final temp = start;
+      start = end;
+      end = temp;
+    }
+
+    if (_hasData) {
+      final first = widget.session.data.first.time;
+      final last = widget.session.data.last.time;
+      if (start.isBefore(first)) start = first;
+      if (end.isAfter(last)) end = last;
+    }
+
+    if (start == rangeStartTime && end == rangeEndTime) return;
+
+    _isSyncingFromCode = true;
+    setState(() {
+      rangeStartTime = start;
+      rangeEndTime = end;
+    });
+    _rangeController.start = start;
+    _rangeController.end = end;
+    _isSyncingFromCode = false;
+  }
+
+  Future<void> _pickBoundary({required bool isStart}) async {
+    if (!_hasData) return;
+
+    final initial = isStart ? rangeStartTime : rangeEndTime;
+    double selectedSeconds = _offsetFromStart(initial).inSeconds.toDouble();
+
+    final result = await showModalBottomSheet<Duration>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final preview = Duration(seconds: selectedSeconds.round());
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode
+                      ? const Color(0xFF12171C)
+                      : Colors.white,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isStart
+                          ? t('Set start', 'Setează începutul')
+                          : t('Set end', 'Setează sfârșitul'),
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _formatOffset(preview),
+                      style: const TextStyle(
+                          fontSize: 28, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Slider(
+                      value: selectedSeconds.clamp(0, _totalDurationSeconds),
+                      min: 0,
+                      max: _totalDurationSeconds,
+                      divisions: _totalDurationSeconds >= 60
+                          ? _totalDurationSeconds.round()
+                          : null,
+                      label: _formatOffset(preview),
+                      onChanged: (value) {
+                        setModalState(() {
+                          selectedSeconds = value;
+                        });
+                      },
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton(
+                          onPressed: () =>
+                              setModalState(() => selectedSeconds = 0),
+                          child: Text(t('Start', 'Start')),
+                        ),
+                        TextButton(
+                          onPressed: () => setModalState(
+                              () => selectedSeconds = _totalDurationSeconds),
+                          child: Text(t('End', 'Sfârșit')),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: Text(t('Cancel', 'Renunță')),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context, preview),
+                            child: Text(t('Apply', 'Aplică')),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+    final picked = _timeFromOffset(result);
+    if (isStart) {
+      _syncRange(picked, rangeEndTime);
+    } else {
+      _syncRange(rangeStartTime, picked);
+    }
+  }
+
+  void _syncFromChart(ActualRangeChangedArgs args) {
+    if (args.orientation != AxisOrientation.horizontal) return;
+    if (_isSyncingFromCode) return;
+    final visibleMin = args.visibleMin;
+    final visibleMax = args.visibleMax;
+    if (visibleMin == null || visibleMax == null) return;
+
+    final start = DateTime.fromMillisecondsSinceEpoch(visibleMin.round());
+    final end = DateTime.fromMillisecondsSinceEpoch(visibleMax.round());
+    _syncRange(start, end);
+  }
+
+  Widget _buildBoundaryButton({
+    required String label,
+    required DateTime value,
+    required VoidCallback onPressed,
+  }) {
+    return Expanded(
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _formatOffset(_offsetFromStart(value)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnalysisStats() {
+    final stats = _calculateRangeStats();
+    final visibleCount = _getVisibleData().length;
+
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      childAspectRatio: 1.8,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      children: [
+        _buildStatTile('Min', '${stats['min']!.toStringAsFixed(0)} mV'),
+        _buildStatTile('Max', '${stats['max']!.toStringAsFixed(0)} mV'),
+        _buildStatTile(
+            t('Avg', 'Medie'), '${stats['avg']!.toStringAsFixed(0)} mV'),
+        _buildStatTile(t('Samples', 'Puncte'), '$visibleCount'),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (!_hasData) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+              DateFormat('dd.MM.yyyy HH:mm').format(widget.session.startTime)),
+        ),
+        body: const Center(child: Text('No data')),
+      );
+    }
+
     return Theme(
       data: ThemeData(
-        brightness: isDarkMode ? Brightness.dark : Brightness.light,
+        brightness: widget.isDarkMode ? Brightness.dark : Brightness.light,
         useMaterial3: true,
         colorSchemeSeed: Colors.teal,
       ),
       child: MediaQuery(
         data: MediaQuery.of(context)
-            .copyWith(textScaler: TextScaler.linear(fontScale)),
+            .copyWith(textScaler: TextScaler.linear(widget.fontScale)),
         child: Scaffold(
           appBar: AppBar(
-            title:
-                Text(DateFormat('dd.MM.yyyy HH:mm').format(session.startTime)),
+            title: Text(DateFormat('dd.MM.yyyy HH:mm')
+                .format(widget.session.startTime)),
           ),
           body: Column(
             children: [
               Expanded(
-                child: SfCartesianChart(
-                  primaryXAxis: const NumericAxis(isVisible: false),
-                  primaryYAxis: const NumericAxis(
-                    minimum: 0,
-                    maximum: 4300,
-                    interval: 500,
-                  ),
-                  series: <LineSeries<EkgData, int>>[
-                    LineSeries<EkgData, int>(
-                      dataSource: session.data,
-                      xValueMapper: (EkgData d, i) => i,
-                      yValueMapper: (EkgData d, _) => d.value,
-                      color: Colors.cyan,
-                      width: 2,
-                    )
+                child: Column(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: widget.isDarkMode
+                                    ? [
+                                        const Color(0xFF07131B),
+                                        const Color(0xFF0F2430),
+                                      ]
+                                    : [
+                                        const Color(0xFFE6F9FF),
+                                        const Color(0xFFF8FCFF),
+                                      ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                            ),
+                            child: SfCartesianChart(
+                              margin: const EdgeInsets.all(10),
+                              zoomPanBehavior: _zoomPanBehavior,
+                              onActualRangeChanged: _syncFromChart,
+                              primaryXAxis: DateTimeAxis(
+                                minimum: widget.session.data.first.time,
+                                maximum: widget.session.data.last.time,
+                                rangeController: _rangeController,
+                                dateFormat: DateFormat('dd.MM HH:mm'),
+                                intervalType: DateTimeIntervalType.auto,
+                              ),
+                              primaryYAxis: const NumericAxis(
+                                minimum: 0,
+                                maximum: 4300,
+                                interval: 500,
+                              ),
+                              series: <LineSeries<EkgData, DateTime>>[
+                                LineSeries<EkgData, DateTime>(
+                                  dataSource: widget.session.data,
+                                  xValueMapper: (EkgData d, _) => d.time,
+                                  yValueMapper: (EkgData d, _) => d.value,
+                                  color: Colors.cyanAccent,
+                                  width: 2,
+                                  animationDuration: 800,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      color: widget.isDarkMode
+                          ? const Color(0xFF0E1418)
+                          : Colors.grey[100],
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            t('Analysis window', 'Fereastră analiză'),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              _buildBoundaryButton(
+                                label: t('Start time', 'Început'),
+                                value: rangeStartTime,
+                                onPressed: () => _pickBoundary(isStart: true),
+                              ),
+                              const SizedBox(width: 10),
+                              _buildBoundaryButton(
+                                label: t('End time', 'Sfârșit'),
+                                value: rangeEndTime,
+                                onPressed: () => _pickBoundary(isStart: false),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          RangeSlider(
+                            values: RangeValues(
+                              _offsetFromStart(rangeStartTime)
+                                  .inSeconds
+                                  .toDouble(),
+                              _offsetFromStart(rangeEndTime)
+                                  .inSeconds
+                                  .toDouble(),
+                            ),
+                            min: 0,
+                            max: _totalDurationSeconds,
+                            onChanged: (RangeValues values) {
+                              final start = _timeFromOffset(
+                                  Duration(seconds: values.start.round()));
+                              final end = _timeFromOffset(
+                                  Duration(seconds: values.end.round()));
+                              _syncRange(start, end);
+                            },
+                            labels: RangeLabels(
+                              _formatOffset(_offsetFromStart(rangeStartTime)),
+                              _formatOffset(_offsetFromStart(rangeEndTime)),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              t(
+                                'Samples: ${_getVisibleData().length} • Duration: ${_formatDuration(_rangeDuration)}',
+                                'Puncte: ${_getVisibleData().length} • Durată: ${_formatDuration(_rangeDuration)}',
+                              ),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.all(16),
-                color: Colors.grey[900],
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                color:
+                    widget.isDarkMode ? const Color(0xFF141A1F) : Colors.white,
                 child: Column(
                   children: [
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      childAspectRatio: 2,
-                      children: [
-                        _buildStatTile(
-                            "Min", "${session.minValue.toStringAsFixed(0)} mV"),
-                        _buildStatTile(
-                            "Max", "${session.maxValue.toStringAsFixed(0)} mV"),
-                        _buildStatTile(t("Avg", "Medie"),
-                            "${session.avgValue.toStringAsFixed(0)} mV"),
-                        _buildStatTile(
-                            t("Samples", "Puncte"), "${session.data.length}"),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
+                    _buildAnalysisStats(),
+                    const SizedBox(height: 14),
                     ElevatedButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text(t("Back", "Înapoi")),
+                      child: Text(t('Back', 'Înapoi')),
                     ),
                   ],
                 ),
@@ -1068,7 +1506,7 @@ class DetailScreen extends StatelessWidget {
 
   Widget _buildStatTile(String label, String value) {
     return Card(
-      color: Colors.grey[800],
+      color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
