@@ -1150,113 +1150,6 @@ class _DetailScreenState extends State<DetailScreen> {
     _isSyncingFromCode = false;
   }
 
-  Future<void> _pickBoundary({required bool isStart}) async {
-    if (!_hasData) return;
-
-    final initial = isStart ? rangeStartTime : rangeEndTime;
-    double selectedSeconds = _offsetFromStart(initial).inSeconds.toDouble();
-
-    final result = await showModalBottomSheet<Duration>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final preview = Duration(seconds: selectedSeconds.round());
-            return SafeArea(
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode
-                      ? const Color(0xFF12171C)
-                      : Colors.white,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isStart
-                          ? t('Set start', 'Setează începutul')
-                          : t('Set end', 'Setează sfârșitul'),
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _formatOffset(preview),
-                      style: const TextStyle(
-                          fontSize: 28, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Slider(
-                      value: selectedSeconds.clamp(0, _totalDurationSeconds),
-                      min: 0,
-                      max: _totalDurationSeconds,
-                      divisions: _totalDurationSeconds >= 60
-                          ? _totalDurationSeconds.round()
-                          : null,
-                      label: _formatOffset(preview),
-                      onChanged: (value) {
-                        setModalState(() {
-                          selectedSeconds = value;
-                        });
-                      },
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        TextButton(
-                          onPressed: () =>
-                              setModalState(() => selectedSeconds = 0),
-                          child: Text(t('Start', 'Start')),
-                        ),
-                        TextButton(
-                          onPressed: () => setModalState(
-                              () => selectedSeconds = _totalDurationSeconds),
-                          child: Text(t('End', 'Sfârșit')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: Text(t('Cancel', 'Renunță')),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context, preview),
-                            child: Text(t('Apply', 'Aplică')),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    if (result == null) return;
-    final picked = _timeFromOffset(result);
-    if (isStart) {
-      _syncRange(picked, rangeEndTime);
-    } else {
-      _syncRange(rangeStartTime, picked);
-    }
-  }
-
   void _syncFromChart(ActualRangeChangedArgs args) {
     if (args.orientation != AxisOrientation.horizontal) return;
     if (_isSyncingFromCode) return;
@@ -1266,21 +1159,27 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final start = DateTime.fromMillisecondsSinceEpoch(visibleMin.round());
     final end = DateTime.fromMillisecondsSinceEpoch(visibleMax.round());
-    _syncRange(start, end);
+    if (start == rangeStartTime && end == rangeEndTime) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (start == rangeStartTime && end == rangeEndTime) return;
+      _syncRange(start, end);
+    });
   }
 
   Widget _buildBoundaryButton({
     required String label,
     required DateTime value,
-    required VoidCallback onPressed,
   }) {
     return Expanded(
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: widget.isDarkMode ? const Color(0xFF1B232A) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: widget.isDarkMode ? Colors.white10 : Colors.black12,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1290,12 +1189,12 @@ class _DetailScreenState extends State<DetailScreen> {
               label,
               style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               _formatOffset(_offsetFromStart(value)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
             ),
           ],
         ),
@@ -1307,19 +1206,46 @@ class _DetailScreenState extends State<DetailScreen> {
     final stats = _calculateRangeStats();
     final visibleCount = _getVisibleData().length;
 
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      childAspectRatio: 1.8,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      children: [
-        _buildStatTile('Min', '${stats['min']!.toStringAsFixed(0)} mV'),
-        _buildStatTile('Max', '${stats['max']!.toStringAsFixed(0)} mV'),
-        _buildStatTile(
-            t('Avg', 'Medie'), '${stats['avg']!.toStringAsFixed(0)} mV'),
-        _buildStatTile(t('Samples', 'Puncte'), '$visibleCount'),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: widget.isDarkMode
+            ? const Color(0xFF1A2127)
+            : const Color(0xFFF4F6F8),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatTile(
+                    'Min', '${stats['min']!.toStringAsFixed(0)} mV'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatTile(
+                    'Max', '${stats['max']!.toStringAsFixed(0)} mV'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatTile(
+                  t('Avg', 'Medie'),
+                  '${stats['avg']!.toStringAsFixed(0)} mV',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatTile(t('Samples', 'Puncte'), '$visibleCount'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1428,13 +1354,11 @@ class _DetailScreenState extends State<DetailScreen> {
                               _buildBoundaryButton(
                                 label: t('Start time', 'Început'),
                                 value: rangeStartTime,
-                                onPressed: () => _pickBoundary(isStart: true),
                               ),
                               const SizedBox(width: 10),
                               _buildBoundaryButton(
                                 label: t('End time', 'Sfârșit'),
                                 value: rangeEndTime,
-                                onPressed: () => _pickBoundary(isStart: false),
                               ),
                             ],
                           ),
@@ -1489,10 +1413,28 @@ class _DetailScreenState extends State<DetailScreen> {
                 child: Column(
                   children: [
                     _buildAnalysisStats(),
-                    const SizedBox(height: 14),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(t('Back', 'Înapoi')),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              _syncRange(
+                                widget.session.data.first.time,
+                                widget.session.data.last.time,
+                              );
+                            },
+                            child: Text(t('Reset view', 'Resetează vederea')),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: Text(t('Back', 'Înapoi')),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
