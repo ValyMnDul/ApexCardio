@@ -1110,6 +1110,118 @@ class _DetailScreenState extends State<DetailScreen> {
     return '+${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _pickBoundary({required bool isStart}) async {
+    if (!_hasData) return;
+
+    final initial = isStart ? rangeStartTime : rangeEndTime;
+    double selectedSeconds = _offsetFromStart(initial).inSeconds.toDouble();
+
+    final result = await showModalBottomSheet<Duration>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final preview = Duration(seconds: selectedSeconds.round());
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                decoration: BoxDecoration(
+                  color: widget.isDarkMode
+                      ? const Color(0xFF12171C)
+                      : Colors.white,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isStart
+                          ? t('Set start', 'Setează începutul')
+                          : t('Set end', 'Setează sfârșitul'),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _formatOffset(preview),
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Slider(
+                      value: selectedSeconds.clamp(0, _totalDurationSeconds),
+                      min: 0,
+                      max: _totalDurationSeconds,
+                      divisions: _totalDurationSeconds >= 60
+                          ? _totalDurationSeconds.round()
+                          : null,
+                      label: _formatOffset(preview),
+                      onChanged: (value) {
+                        setModalState(() {
+                          selectedSeconds = value;
+                        });
+                      },
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton(
+                          onPressed: () =>
+                              setModalState(() => selectedSeconds = 0),
+                          child: Text(t('Start', 'Start')),
+                        ),
+                        TextButton(
+                          onPressed: () => setModalState(
+                            () => selectedSeconds = _totalDurationSeconds,
+                          ),
+                          child: Text(t('End', 'Sfârșit')),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: Text(t('Cancel', 'Renunță')),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context, preview),
+                            child: Text(t('Apply', 'Aplică')),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+    final picked = _timeFromOffset(result);
+    if (isStart) {
+      _syncRange(picked, rangeEndTime);
+    } else {
+      _syncRange(rangeStartTime, picked);
+    }
+  }
+
   String _formatDuration(Duration duration) {
     final days = duration.inDays;
     final hours = duration.inHours.remainder(24);
@@ -1170,16 +1282,20 @@ class _DetailScreenState extends State<DetailScreen> {
   Widget _buildBoundaryButton({
     required String label,
     required DateTime value,
+    required VoidCallback onPressed,
   }) {
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: widget.isDarkMode ? const Color(0xFF1B232A) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: widget.isDarkMode ? Colors.white10 : Colors.black12,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          side: BorderSide(
+            color: widget.isDarkMode ? Colors.white12 : Colors.black12,
           ),
+          backgroundColor:
+              widget.isDarkMode ? const Color(0xFF1B232A) : Colors.white,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1246,6 +1362,34 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _exportVisibleSegment() async {
+    final visibleData = _getVisibleData();
+    if (visibleData.isEmpty) return;
+
+    final tempDir = await getTemporaryDirectory();
+    final startOffset = _offsetFromStart(rangeStartTime).inSeconds;
+    final endOffset = _offsetFromStart(rangeEndTime).inSeconds;
+    final file = File(
+      '${tempDir.path}/apex_segment_${widget.session.startTime.millisecondsSinceEpoch}_${startOffset}_$endOffset.csv',
+    );
+
+    final lines = <String>['ElapsedMs,Time,Voltage'];
+    final segmentStart = visibleData.first.time;
+    for (final point in visibleData) {
+      final elapsedMs = point.time.difference(segmentStart).inMilliseconds;
+      lines.add(
+        '$elapsedMs,${DateFormat('HH:mm:ss.SSS').format(point.time)},${point.value}',
+      );
+    }
+
+    await file.writeAsString(lines.join('\n'));
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text:
+          'ApexCardio segment ${_formatOffset(_offsetFromStart(rangeStartTime))} - ${_formatOffset(_offsetFromStart(rangeEndTime))}',
     );
   }
 
@@ -1354,37 +1498,15 @@ class _DetailScreenState extends State<DetailScreen> {
                               _buildBoundaryButton(
                                 label: t('Start time', 'Început'),
                                 value: rangeStartTime,
+                                onPressed: () => _pickBoundary(isStart: true),
                               ),
                               const SizedBox(width: 10),
                               _buildBoundaryButton(
                                 label: t('End time', 'Sfârșit'),
                                 value: rangeEndTime,
+                                onPressed: () => _pickBoundary(isStart: false),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 8),
-                          RangeSlider(
-                            values: RangeValues(
-                              _offsetFromStart(rangeStartTime)
-                                  .inSeconds
-                                  .toDouble(),
-                              _offsetFromStart(rangeEndTime)
-                                  .inSeconds
-                                  .toDouble(),
-                            ),
-                            min: 0,
-                            max: _totalDurationSeconds,
-                            onChanged: (RangeValues values) {
-                              final start = _timeFromOffset(
-                                  Duration(seconds: values.start.round()));
-                              final end = _timeFromOffset(
-                                  Duration(seconds: values.end.round()));
-                              _syncRange(start, end);
-                            },
-                            labels: RangeLabels(
-                              _formatOffset(_offsetFromStart(rangeStartTime)),
-                              _formatOffset(_offsetFromStart(rangeEndTime)),
-                            ),
                           ),
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
@@ -1418,19 +1540,47 @@ class _DetailScreenState extends State<DetailScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () {
-                              _syncRange(
-                                widget.session.data.first.time,
-                                widget.session.data.last.time,
-                              );
-                            },
-                            child: Text(t('Reset view', 'Resetează vederea')),
+                            onPressed: () => _exportVisibleSegment(),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              side: BorderSide(
+                                color: widget.isDarkMode
+                                    ? Colors.white24
+                                    : Colors.black12,
+                              ),
+                            ),
+                            child: Text(
+                              t('Export segment', 'Export segment'),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: ElevatedButton(
+                          child: OutlinedButton(
                             onPressed: () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              side: BorderSide(
+                                color: widget.isDarkMode
+                                    ? Colors.white24
+                                    : Colors.black12,
+                              ),
+                              backgroundColor: widget.isDarkMode
+                                  ? const Color(0xFF1B232A)
+                                  : Colors.white,
+                            ),
                             child: Text(t('Back', 'Înapoi')),
                           ),
                         ),
