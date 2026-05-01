@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -1114,7 +1115,38 @@ class _DetailScreenState extends State<DetailScreen> {
     if (!_hasData) return;
 
     final initial = isStart ? rangeStartTime : rangeEndTime;
-    double selectedSeconds = _offsetFromStart(initial).inSeconds.toDouble();
+    final initialOffset = _offsetFromStart(initial);
+    double selectedSeconds = initialOffset.inSeconds.toDouble();
+    final hoursController = TextEditingController(
+      text: initialOffset.inHours.toString(),
+    );
+    final minutesController = TextEditingController(
+      text: initialOffset.inMinutes.remainder(60).toString().padLeft(2, '0'),
+    );
+    final secondsController = TextEditingController(
+      text: initialOffset.inSeconds.remainder(60).toString().padLeft(2, '0'),
+    );
+
+    Duration readDurationFromFields() {
+      int parseField(TextEditingController controller) =>
+          int.tryParse(controller.text.trim()) ?? 0;
+      final hours = parseField(hoursController);
+      final minutes = parseField(minutesController);
+      final seconds = parseField(secondsController);
+      final totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+      return Duration(seconds: totalSeconds < 0 ? 0 : totalSeconds);
+    }
+
+    void syncFieldsFromSeconds(StateSetter setModalState, double value) {
+      final duration = Duration(seconds: value.round());
+      final hours = duration.inHours;
+      final minutes = duration.inMinutes.remainder(60);
+      final seconds = duration.inSeconds.remainder(60);
+      hoursController.text = hours.toString();
+      minutesController.text = minutes.toString().padLeft(2, '0');
+      secondsController.text = seconds.toString().padLeft(2, '0');
+      setModalState(() {});
+    }
 
     final result = await showModalBottomSheet<Duration>(
       context: context,
@@ -1168,20 +1200,101 @@ class _DetailScreenState extends State<DetailScreen> {
                         setModalState(() {
                           selectedSeconds = value;
                         });
+                        syncFieldsFromSeconds(setModalState, value);
                       },
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: hoursController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'h',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onChanged: (_) {
+                              setModalState(() {
+                                selectedSeconds = readDurationFromFields()
+                                    .inSeconds
+                                    .toDouble();
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: minutesController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'min',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onChanged: (_) {
+                              setModalState(() {
+                                selectedSeconds = readDurationFromFields()
+                                    .inSeconds
+                                    .toDouble();
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: secondsController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'sec',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            onChanged: (_) {
+                              setModalState(() {
+                                selectedSeconds = readDurationFromFields()
+                                    .inSeconds
+                                    .toDouble();
+                              });
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         TextButton(
-                          onPressed: () =>
-                              setModalState(() => selectedSeconds = 0),
+                          onPressed: () {
+                            setModalState(() {
+                              selectedSeconds = 0;
+                            });
+                            syncFieldsFromSeconds(setModalState, 0);
+                          },
                           child: Text(t('Start', 'Start')),
                         ),
                         TextButton(
-                          onPressed: () => setModalState(
-                            () => selectedSeconds = _totalDurationSeconds,
-                          ),
+                          onPressed: () {
+                            setModalState(() {
+                              selectedSeconds = _totalDurationSeconds;
+                            });
+                            syncFieldsFromSeconds(
+                              setModalState,
+                              _totalDurationSeconds,
+                            );
+                          },
                           child: Text(t('End', 'Sfârșit')),
                         ),
                       ],
@@ -1198,7 +1311,10 @@ class _DetailScreenState extends State<DetailScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context, preview),
+                            onPressed: () {
+                              final fieldDuration = readDurationFromFields();
+                              Navigator.pop(context, fieldDuration);
+                            },
                             child: Text(t('Apply', 'Aplică')),
                           ),
                         ),
@@ -1555,9 +1671,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                     : Colors.black12,
                               ),
                             ),
-                            child: Text(
-                              t('Export segment', 'Export segment'),
-                            ),
+                            child: Text(t('Export segment', 'Export segment')),
                           ),
                         ),
                         const SizedBox(width: 12),
