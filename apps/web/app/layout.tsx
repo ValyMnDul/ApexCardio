@@ -13,11 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ApexCardio - Advanced Cardiovascular Health Monitoring",
-  description: "Track your heart health with precision. Real-time insights, advanced analytics, and personalized wellness goals. Download ApexCardio on iOS and Android.",
+  title: "ApexCardio",
+  description: "Advanced Cardiovascular Health Monitoring",
   keywords: "heart health, cardiovascular monitoring, fitness tracking, health app, heart rate",
   creator: "ApexCardio",
-  metadataBase: new URL("https://apexcardio.com"),
 };
 
 export default function RootLayout({
