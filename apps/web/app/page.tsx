@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 
 export default function Main() {
@@ -182,48 +183,67 @@ export default function Main() {
 
           <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
             {/* iOS */}
-            <div className="bg-white rounded-2xl p-10 border-2 border-gray-200 hover:border-blue-600 transition flex flex-col items-center justify-between">
+            <div className="bg-white rounded-2xl p-8 sm:p-10 border-2 border-gray-200 hover:border-blue-600 transition flex flex-col h-full shadow-sm">
               <div>
                 <div className="mb-6 flex justify-center">
-                  <svg className="w-16 h-16 text-gray-900" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M17.05 13.5c-.91 0-1.82.55-2.25 1.74h4.5c-.43-1.19-1.34-1.74-2.25-1.74m-4.4 0c-.9 0-1.81.55-2.25 1.74h4.5c-.44-1.19-1.35-1.74-2.25-1.74M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-5 16.5c0 .83-.67 1.5-1.5 1.5S4 19.33 4 18.5 4.67 17 5.5 17s1.5.67 1.5 1.5m0-7c0 .83-.67 1.5-1.5 1.5S4 12.33 4 11.5 4.67 10 5.5 10s1.5.67 1.5 1.5m8 7c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5.67-1.5 1.5-1.5 1.5.67 1.5 1.5m0-7c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5.67-1.5 1.5-1.5 1.5.67 1.5 1.5z"/>
-                  </svg>
+                  <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                    <Image
+                      src="/apple.png"
+                      alt="Apple logo"
+                      fill
+                      sizes="80px"
+                      className="object-contain p-3"
+                      priority
+                    />
+                  </div>
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2 text-center">iPhone &amp; iPad</h3>
-                <p className="text-gray-600 text-center mb-8">
-                  Download ApexCardio from the Apple App Store and monitor your heart health on the go.
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 text-center mb-2">
+                  Available for iOS
+                </p>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 text-center">iPhone &amp; iPad</h3>
+                <p className="text-gray-600 text-center leading-relaxed mb-8">
+                  Download ApexCardio from the App Store and keep your heart data close, wherever you are.
                 </p>
               </div>
-              <div className="w-full">
+              <div className="w-full mt-auto">
                 <a 
                   href="https://apps.apple.com"
-                  className="block w-full bg-gray-900 text-white py-4 rounded-lg font-semibold text-center hover:bg-gray-800 transition mb-3"
+                  className="block w-full bg-gray-900 text-white py-4 rounded-xl font-semibold text-center hover:bg-gray-800 transition mb-3"
                 >
-                  Download on App Store
+                  Download on the App Store
                 </a>
                 <p className="text-sm text-gray-500 text-center">Requires iOS 14.0 or later</p>
               </div>
             </div>
 
             {/* Android */}
-            <div className="bg-white rounded-2xl p-10 border-2 border-gray-200 hover:border-blue-600 transition flex flex-col items-center justify-between">
+            <div className="bg-white rounded-2xl p-8 sm:p-10 border-2 border-gray-200 hover:border-blue-600 transition flex flex-col h-full shadow-sm">
               <div>
                 <div className="mb-6 flex justify-center">
-                  <svg className="w-16 h-16 text-green-600" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M17.6 9.48l1.84-3.18c.16-.31.04-.64-.37-.64h-3.01c-.23 0-.43.13-.53.33L12.96 9.9c-.16.31-.04.64.37.64h3.01c.23 0 .43-.13.53-.33M6.4 9.48L4.56 6.3C4.4 5.99 4.52 5.66 4.93 5.66h3.01c.23 0 .43.13.53.33l1.84 3.18c.16.31.04.64-.37.64H6.93c-.23 0-.43-.13-.53-.33M19 6.5H5c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-11c0-1.1-.9-2-2-2z"/>
-                  </svg>
+                  <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                    <Image
+                      src="/android.png"
+                      alt="Android logo"
+                      fill
+                      sizes="80px"
+                      className="object-contain p-3"
+                    />
+                  </div>
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2 text-center">Android</h3>
-                <p className="text-gray-600 text-center mb-8">
-                  Get ApexCardio on Google Play Store for seamless heart monitoring on your Android device.
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 text-center mb-2">
+                  Available for Android
+                </p>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 text-center">Android</h3>
+                <p className="text-gray-600 text-center leading-relaxed mb-8">
+                  Get ApexCardio from Google Play and track your cardiovascular health on every Android device.
                 </p>
               </div>
-              <div className="w-full">
+              <div className="w-full mt-auto">
                 <a 
                   href="https://play.google.com"
-                  className="block w-full bg-green-600 text-white py-4 rounded-lg font-semibold text-center hover:bg-green-700 transition mb-3"
+                  className="block w-full bg-blue-600 text-white py-4 rounded-xl font-semibold text-center hover:bg-blue-700 transition mb-3"
                 >
-                  Download on Google Play
+                  Get it on Google Play
                 </a>
                 <p className="text-sm text-gray-500 text-center">Requires Android 8.0 or later</p>
               </div>
