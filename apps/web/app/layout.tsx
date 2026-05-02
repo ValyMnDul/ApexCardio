@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "ApexCardio",
-  description: "Advanced Cardiovascular Health Monitoring",
+  description: "Portable cardiac monitoring system",
   keywords: "heart health, cardiovascular monitoring, fitness tracking, health app, heart rate",
   creator: "ApexCardio",
 };
