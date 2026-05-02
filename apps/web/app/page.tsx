@@ -361,8 +361,6 @@ export default function Main() {
               <ul className="space-y-2 text-sm">
                 <li><a href="/about" className="hover:text-blue-400 transition">About Us</a></li>
                 <li><a href="#contact" className="hover:text-blue-400 transition">Contact</a></li>
-                <li><a href="/blog" className="hover:text-blue-400 transition">Blog</a></li>
-                <li><a href="/press" className="hover:text-blue-400 transition">Press</a></li>
               </ul>
             </div>
 

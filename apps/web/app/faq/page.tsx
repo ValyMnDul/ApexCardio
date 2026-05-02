@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 
 export default function FAQ() {
   const [openItems, setOpenItems] = useState<number[]>([]);
@@ -43,16 +44,16 @@ export default function FAQ() {
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <a href="/" className="flex items-center space-x-2">
+          <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold">AC</span>
             </div>
             <span className="text-xl font-bold text-gray-900">ApexCardio</span>
-          </a>
+          </Link>
           <div className="hidden md:flex space-x-8">
-            <a href="/#features" className="text-gray-700 hover:text-blue-600 transition">Features</a>
-            <a href="/#download" className="text-gray-700 hover:text-blue-600 transition">Download</a>
-            <a href="/#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</a>
+            <Link href="/#features" className="text-gray-700 hover:text-blue-600 transition">Features</Link>
+            <Link href="/#download" className="text-gray-700 hover:text-blue-600 transition">Download</Link>
+            <Link href="/#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</Link>
           </div>
         </div>
       </nav>
@@ -122,18 +123,18 @@ export default function FAQ() {
             <div>
               <h4 className="text-white font-semibold mb-4">Product</h4>
               <ul className="space-y-2 text-sm">
-                <li><a href="/#features" className="hover:text-blue-400 transition">Features</a></li>
-                <li><a href="/#download" className="hover:text-blue-400 transition">Download</a></li>
-                <li><a href="/faq" className="hover:text-blue-400 transition">FAQ</a></li>
+                <li><Link href="/#features" className="hover:text-blue-400 transition">Features</Link></li>
+                <li><Link href="/#download" className="hover:text-blue-400 transition">Download</Link></li>
+                <li><Link href="/faq" className="hover:text-blue-400 transition">FAQ</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="text-white font-semibold mb-4">Company</h4>
               <ul className="space-y-2 text-sm">
-                <li><a href="/about" className="hover:text-blue-400 transition">About Us</a></li>
-                <li><a href="/#contact" className="hover:text-blue-400 transition">Contact</a></li>
-                <li><a href="/blog" className="hover:text-blue-400 transition">Blog</a></li>
-                <li><a href="/press" className="hover:text-blue-400 transition">Press</a></li>
+                <li><Link href="/about" className="hover:text-blue-400 transition">About Us</Link></li>
+                <li><Link href="/#contact" className="hover:text-blue-400 transition">Contact</Link></li>
+                <li><Link href="/blog" className="hover:text-blue-400 transition">Blog</Link></li>
+                <li><Link href="/press" className="hover:text-blue-400 transition">Press</Link></li>
               </ul>
             </div>
             <div>
@@ -162,13 +163,13 @@ export default function FAQ() {
               </div>
             </div>
           </div>
-          <div className="border-t border-gray-800 my-8"></div>
+              <div className="border-t border-gray-800 my-8"></div>
           <div className="flex flex-col md:flex-row justify-between items-center text-sm text-gray-400">
             <p>&copy; 2024 ApexCardio. All rights reserved.</p>
             <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="/privacy" className="hover:text-blue-400 transition">Privacy Policy</a>
-              <a href="/terms" className="hover:text-blue-400 transition">Terms of Service</a>
-              <a href="/cookies" className="hover:text-blue-400 transition">Cookie Policy</a>
+              <Link href="/privacy" className="hover:text-blue-400 transition">Privacy Policy</Link>
+              <Link href="/terms" className="hover:text-blue-400 transition">Terms of Service</Link>
+              <Link href="/cookies" className="hover:text-blue-400 transition">Cookie Policy</Link>
             </div>
           </div>
         </div>
