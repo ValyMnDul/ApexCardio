@@ -2,8 +2,8 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-import { FaInstagram, FaGithub, FaFacebook } from "react-icons/fa";
-import { SiTiktok } from "react-icons/si";
+import Navbar from './components/Navbar';
+import Footer from './components/Footer';
 
 export default function Main() {
   const [formStatus, setFormStatus] = useState('');
@@ -38,35 +38,23 @@ export default function Main() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">AC</span>
-            </div>
-            <span className="text-xl font-bold text-gray-900">ApexCardio</span>
-          </div>
-          <div className="hidden md:flex space-x-8">
-            <a href="#features" className="text-gray-700 hover:text-blue-600 transition">Features</a>
-            <a href="#download" className="text-gray-700 hover:text-blue-600 transition">Download</a>
-            <a href="#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</a>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* Hero Section */}
       <section className="bg-linear-to-br from-blue-50 to-white pt-20 pb-24 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
+              <div className="inline-flex items-center rounded-full border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 shadow-sm mb-6">
+                Cardiovascular tracking, simplified.
+              </div>
               <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
                 Track Your Heart Health with Precision
               </h1>
               <p className="text-xl text-gray-600 mb-8 leading-relaxed">
                 ApexCardio gives you real-time insights into your cardiovascular health. Monitor your heart rate, track fitness metrics, and achieve your wellness goals with advanced analytics.
               </p>
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-stretch sm:justify-start">
                 <a href="#download" className="bg-blue-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-blue-700 transition transform hover:scale-105 text-center">
                   Download Now
                 </a>
@@ -77,7 +65,7 @@ export default function Main() {
             </div>
             <div className="bg-linear-to-br from-blue-100 to-blue-50 rounded-2xl aspect-square flex items-center justify-center">
               <div className="text-center">
-                <div className="inline-block p-6 bg-white rounded-full mb-4">
+                <div className="inline-block p-6 bg-white rounded-full mb-4 shadow-sm">
                   <svg className="w-16 h-16 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
@@ -158,12 +146,12 @@ export default function Main() {
                 )
               }
             ].map((feature, idx) => (
-              <div key={idx} className="p-8 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-lg transition">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 mb-4">
+              <div key={idx} className="rounded-xl border border-gray-200 p-8 transition hover:border-blue-400 hover:shadow-lg">
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
                   {feature.icon}
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">{feature.title}</h3>
-                <p className="text-gray-600 leading-relaxed">{feature.description}</p>
+                <h3 className="mb-3 text-xl font-bold text-gray-900">{feature.title}</h3>
+                <p className="leading-relaxed text-gray-600">{feature.description}</p>
               </div>
             ))}
           </div>
@@ -329,98 +317,7 @@ export default function Main() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-gray-300 py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-12">
-            {/* Brand */}
-            <div>
-              <div className="flex items-center space-x-2 mb-4">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">AC</span>
-                </div>
-                <span className="text-lg font-bold text-white">ApexCardio</span>
-              </div>
-              <p className="text-sm leading-relaxed">
-                Advanced cardiovascular health monitoring for everyone.
-              </p>
-            </div>
-
-            {/* Product */}
-            <div>
-              <h4 className="text-white font-semibold mb-4">Product</h4>
-              <ul className="space-y-2 text-sm">
-                <li><a href="#features" className="hover:text-blue-400 transition">Features</a></li>
-                <li><a href="#download" className="hover:text-blue-400 transition">Download</a></li>
-                <li><a href="/faq" className="hover:text-blue-400 transition">FAQ</a></li>
-              </ul>
-            </div>
-
-            {/* Company */}
-            <div>
-              <h4 className="text-white font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-sm">
-                <li><a href="/about" className="hover:text-blue-400 transition">About Us</a></li>
-                <li><a href="#contact" className="hover:text-blue-400 transition">Contact</a></li>
-              </ul>
-            </div>
-
-            {/* Social Media */}
-            <div>
-              <h4 className="text-white font-semibold mb-4">Follow Us</h4>
-              <div className="flex space-x-4">
-                <a
-                  href="https://github.com"
-                  className="p-2 bg-gray-800 rounded-lg hover:bg-blue-600 transition flex items-center justify-center text-white"
-                  title="GitHub"
-                  aria-label="GitHub"
-                >
-                  <FaGithub className="w-5 h-5" aria-hidden="true" />
-                </a>
-
-                <a
-                  href="https://instagram.com"
-                  className="p-2 bg-gray-800 rounded-lg hover:bg-pink-500 transition flex items-center justify-center text-white"
-                  title="Instagram"
-                  aria-label="Instagram"
-                >
-                  <FaInstagram className="w-5 h-5" aria-hidden="true" />
-                </a>
-
-                <a
-                  href="https://tiktok.com"
-                  className="p-2 bg-gray-800 rounded-lg hover:bg-black transition flex items-center justify-center text-white"
-                  title="TikTok"
-                  aria-label="TikTok"
-                >
-                  <SiTiktok className="w-5 h-5" aria-hidden="true" />
-                </a>
-
-                <a
-                  href="https://facebook.com"
-                  className="p-2 bg-gray-800 rounded-lg hover:bg-blue-700 transition flex items-center justify-center text-white"
-                  title="Facebook"
-                  aria-label="Facebook"
-                >
-                  <FaFacebook className="w-5 h-5" aria-hidden="true" />
-                </a>
-              </div>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-gray-800 my-8"></div>
-
-          {/* Bottom Section */}
-          <div className="flex flex-col md:flex-row justify-between items-center text-sm text-gray-400">
-            <p>&copy; 2026 ApexCardio. All rights reserved.</p>
-            <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="/privacy" className="hover:text-blue-400 transition">Privacy Policy</a>
-              <a href="/terms" className="hover:text-blue-400 transition">Terms of Service</a>
-              <a href="/cookies" className="hover:text-blue-400 transition">Cookie Policy</a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

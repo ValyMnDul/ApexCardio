@@ -1,18 +1,9 @@
-import Link from "next/link";
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 export default function Privacy() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">AC</span>
-            </div>
-            <span className="text-xl font-bold text-gray-900">ApexCardio</span>
-          </Link>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* Content */}
       <section className="py-20 px-4 bg-white">
@@ -65,20 +56,7 @@ export default function Privacy() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-gray-900 text-gray-300 py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="border-t border-gray-800 my-8"></div>
-          <div className="flex flex-col md:flex-row justify-between items-center text-sm text-gray-400">
-            <p>&copy; 2024 ApexCardio. All rights reserved.</p>
-            <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="/privacy" className="hover:text-blue-400 transition">Privacy Policy</a>
-              <a href="/terms" className="hover:text-blue-400 transition">Terms of Service</a>
-              <a href="/cookies" className="hover:text-blue-400 transition">Cookie Policy</a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }
