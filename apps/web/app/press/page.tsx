@@ -14,7 +14,6 @@ export default function Press() {
           </a>
           <div className="hidden md:flex space-x-8">
             <a href="/#features" className="text-gray-700 hover:text-blue-600 transition">Features</a>
-            <a href="/pricing" className="text-gray-700 hover:text-blue-600 transition">Pricing</a>
             <a href="/#download" className="text-gray-700 hover:text-blue-600 transition">Download</a>
             <a href="/#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</a>
           </div>
@@ -36,10 +35,10 @@ export default function Press() {
             <h2 className="text-3xl font-bold text-gray-900 mb-6">Latest Announcements</h2>
             
             <article className="border-l-4 border-blue-600 pl-6 mb-8 pb-8 border-b">
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">ApexCardio Launches Pro Subscription</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">ApexCardio Expands Free Health Insights</h3>
               <p className="text-sm text-gray-500 mb-4">May 2024</p>
               <p className="text-gray-600 leading-relaxed">
-                ApexCardio is excited to announce the launch of our Pro subscription tier, bringing advanced analytics and unlimited health insights to our users. The new tier includes priority support and export capabilities for healthcare professionals.
+                ApexCardio is excited to announce a major update that brings advanced analytics, clearer summaries, and more useful health insights to every user at no extra cost.
               </p>
             </article>
 
@@ -90,7 +89,6 @@ export default function Press() {
               <ul className="space-y-2 text-sm">
                 <li><a href="/#features" className="hover:text-blue-400 transition">Features</a></li>
                 <li><a href="/#download" className="hover:text-blue-400 transition">Download</a></li>
-                <li><a href="/pricing" className="hover:text-blue-400 transition">Pricing</a></li>
                 <li><a href="/faq" className="hover:text-blue-400 transition">FAQ</a></li>
               </ul>
             </div>

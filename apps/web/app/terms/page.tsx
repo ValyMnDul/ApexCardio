@@ -1,21 +1,22 @@
+import Link from "next/link";
 export default function Terms() {
   return (
     <div className="min-h-screen bg-white">
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <a href="/" className="flex items-center space-x-2">
+          <Link href="/" className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold">AC</span>
             </div>
             <span className="text-xl font-bold text-gray-900">ApexCardio</span>
-          </a>
+          </Link>
         </div>
       </nav>
 
       {/* Content */}
       <section className="py-20 px-4 bg-white">
-        <div className="max-w-4xl mx-auto prose prose-lg max-w-none">
+        <div className="mx-auto prose prose-lg max-w-none">
           <h1 className="text-5xl font-bold text-gray-900 mb-8">Terms of Service</h1>
           
           <div className="space-y-8 text-gray-600 leading-relaxed">

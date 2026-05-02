@@ -41,7 +41,6 @@ export default function Blog() {
           </a>
           <div className="hidden md:flex space-x-8">
             <a href="/#features" className="text-gray-700 hover:text-blue-600 transition">Features</a>
-            <a href="/pricing" className="text-gray-700 hover:text-blue-600 transition">Pricing</a>
             <a href="/#download" className="text-gray-700 hover:text-blue-600 transition">Download</a>
             <a href="/#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</a>
           </div>
@@ -97,7 +96,6 @@ export default function Blog() {
               <ul className="space-y-2 text-sm">
                 <li><a href="/#features" className="hover:text-blue-400 transition">Features</a></li>
                 <li><a href="/#download" className="hover:text-blue-400 transition">Download</a></li>
-                <li><a href="/pricing" className="hover:text-blue-400 transition">Pricing</a></li>
                 <li><a href="/faq" className="hover:text-blue-400 transition">FAQ</a></li>
               </ul>
             </div>

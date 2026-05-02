@@ -15,8 +15,8 @@ export default function FAQ() {
       answer: 'Yes, your data is encrypted using enterprise-grade security protocols. We never share your health information without explicit consent and comply with HIPAA and GDPR regulations.'
     },
     {
-      question: 'Can I use ApexCardio without the paid subscription?',
-      answer: 'Absolutely! Our Free plan includes basic heart rate monitoring, daily summaries, and 7-day data history. Premium features are available with our Pro subscription.'
+      question: 'Can I use ApexCardio for free?',
+      answer: 'Yes. ApexCardio is free to use and includes heart rate monitoring, daily summaries, and 7-day data history for every user.'
     },
     {
       question: 'How do I sync my data across devices?',
@@ -28,7 +28,7 @@ export default function FAQ() {
     },
     {
       question: 'Can I export my health data?',
-      answer: 'Yes, with our Pro subscription you can export your health reports in PDF format. This is useful for sharing with healthcare professionals.'
+      answer: 'Yes, you can export your health reports in PDF format. This is useful for sharing with healthcare professionals.'
     }
   ];
 
@@ -51,7 +51,6 @@ export default function FAQ() {
           </a>
           <div className="hidden md:flex space-x-8">
             <a href="/#features" className="text-gray-700 hover:text-blue-600 transition">Features</a>
-            <a href="/pricing" className="text-gray-700 hover:text-blue-600 transition">Pricing</a>
             <a href="/#download" className="text-gray-700 hover:text-blue-600 transition">Download</a>
             <a href="/#contact" className="text-gray-700 hover:text-blue-600 transition">Contact</a>
           </div>
@@ -125,7 +124,6 @@ export default function FAQ() {
               <ul className="space-y-2 text-sm">
                 <li><a href="/#features" className="hover:text-blue-400 transition">Features</a></li>
                 <li><a href="/#download" className="hover:text-blue-400 transition">Download</a></li>
-                <li><a href="/pricing" className="hover:text-blue-400 transition">Pricing</a></li>
                 <li><a href="/faq" className="hover:text-blue-400 transition">FAQ</a></li>
               </ul>
             </div>
