@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -215,8 +216,10 @@ class _MonitorScreenState extends State<MonitorScreen>
   late TabController _tabController;
   List<EkgData> dataPoints = [];
   List<RecordingSession> sessions = [];
-  ChartSeriesController? _chartSeriesController;
   BluetoothCharacteristic? targetChar;
+  StreamSubscription<List<int>>? _bleSubscription;
+  Timer? _flushTimer;
+  final List<EkgData> _pendingPoints = [];
 
   bool isRecording = false;
   RecordingSession? currentSession;
@@ -233,6 +236,9 @@ class _MonitorScreenState extends State<MonitorScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _flushTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _flushPendingPoints();
+    });
     _loadSettings();
     connectToDevice();
     loadSessions();
@@ -365,22 +371,14 @@ class _MonitorScreenState extends State<MonitorScreen>
             targetChar = char;
             await char.setNotifyValue(true);
 
-            char.lastValueStream.listen((value) {
-              if (value.isNotEmpty) {
-                try {
-                  String raw = utf8.decode(value).trim();
-                  if (raw.contains('\n')) {
-                    raw = raw.split('\n').first.trim();
-                  }
-                  final val = double.tryParse(raw);
-                  if (val != null) {
-                    _updateData(val);
-                  }
-                } catch (e) {
-                  debugPrint('Error parsing: $e');
-                }
+            _bleSubscription?.cancel();
+            _bleSubscription = char.lastValueStream.listen((value) {
+              final parsed = _parseIncomingSample(value);
+              if (parsed != null) {
+                _pendingPoints.add(EkgData(DateTime.now(), parsed));
               }
             });
+            return;
           }
         }
       }
@@ -389,58 +387,57 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
   }
 
-  void _updateData(double val) {
-    final now = DateTime.now();
-    final point = EkgData(now, val);
-    bool removedOldest = false;
+  double? _parseIncomingSample(List<int> value) {
+    if (value.isEmpty) return null;
 
-    if (mounted) {
-      setState(() {
-        dataPoints.add(point);
-        if (isRecording && currentSession != null) {
-          currentSession!.data.add(point);
-        }
-        if (dataPoints.length > liveWindowPoints) {
-          dataPoints.removeAt(0);
-          removedOldest = true;
-        }
-      });
-
-      try {
-        _chartSeriesController?.updateDataSource(
-          addedDataIndex: dataPoints.length - 1,
-          removedDataIndex: removedOldest ? 0 : -1,
-        );
-      } catch (e) {
-        debugPrint('Error updating chart: $e');
-      }
+    if (value.length == 2) {
+      return ByteData.sublistView(Uint8List.fromList(value))
+          .getUint16(0, Endian.little)
+          .toDouble();
     }
+
+    try {
+      final raw = utf8.decode(value).trim();
+      final token = raw.split(RegExp(r'[\s,;]+')).first.trim();
+      return double.tryParse(token);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _flushPendingPoints() {
+    if (!mounted || _pendingPoints.isEmpty) return;
+
+    final points = List<EkgData>.from(_pendingPoints);
+    _pendingPoints.clear();
+
+    setState(() {
+      final updatedPoints = List<EkgData>.from(dataPoints)..addAll(points);
+      if (isRecording && currentSession != null) {
+        currentSession!.data.addAll(points);
+      }
+
+      if (updatedPoints.length > liveWindowPoints) {
+        dataPoints =
+            updatedPoints.sublist(updatedPoints.length - liveWindowPoints);
+      } else {
+        dataPoints = updatedPoints;
+      }
+    });
   }
 
   void _setLiveWindowPoints(int value) {
     final clamped = value.clamp(1, 1000000);
-    int removedCount = 0;
-
     setState(() {
       liveWindowPoints = clamped;
       if (dataPoints.length > liveWindowPoints) {
-        removedCount = dataPoints.length - liveWindowPoints;
-        dataPoints = dataPoints.sublist(removedCount);
+        dataPoints = dataPoints.sublist(dataPoints.length - liveWindowPoints);
       }
     });
-
-    if (removedCount > 0) {
-      try {
-        _chartSeriesController?.updateDataSource(
-          removedDataIndexes: List<int>.generate(removedCount, (i) => i),
-        );
-      } catch (e) {
-        debugPrint('Error shrinking chart window: $e');
-      }
-    }
   }
 
   void startRecording() async {
+    _flushPendingPoints();
     recordingStart = DateTime.now();
     currentSession = RecordingSession(
       id: 'ekg_${recordingStart!.millisecondsSinceEpoch}',
@@ -457,6 +454,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   void stopRecording() async {
     if (currentSession == null) return;
 
+    _flushPendingPoints();
     currentSession!.endTime = DateTime.now();
     currentSession!.calculateStats();
 
@@ -512,6 +510,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void dispose() {
     try {
+      _flushTimer?.cancel();
+      _bleSubscription?.cancel();
       targetChar?.setNotifyValue(false);
       widget.device.disconnect();
     } catch (e) {
@@ -805,9 +805,6 @@ class _MonitorScreenState extends State<MonitorScreen>
                   ),
                   series: <LineSeries<EkgData, DateTime>>[
                     LineSeries<EkgData, DateTime>(
-                      onRendererCreated: (ChartSeriesController controller) {
-                        _chartSeriesController = controller;
-                      },
                       dataSource: dataPoints,
                       xValueMapper: (EkgData d, _) => d.time,
                       yValueMapper: (EkgData d, _) => d.value,
