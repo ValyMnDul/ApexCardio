@@ -10,6 +10,6 @@ class Live extends StatefulWidget {
 class _LiveState extends State<Live> {
   @override
   Widget build(BuildContext context) {
-    return Container(child: Text("Live"));
+    return Text("Live");
   }
 }

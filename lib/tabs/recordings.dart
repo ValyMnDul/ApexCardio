@@ -10,6 +10,6 @@ class Recordings extends StatefulWidget {
 class _RecordingsState extends State<Recordings> {
   @override
   Widget build(BuildContext context) {
-    return Container(child: Text("Recordings"));
+    return Text("Recordings");
   }
 }

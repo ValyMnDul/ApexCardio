@@ -22,13 +22,13 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<ThemeProvider>(context);
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: lightMode,
       darkTheme: darkMode,
-      themeMode: provider.darkmode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: themeProvider.darkmode ? ThemeMode.dark : ThemeMode.light,
       home: Home(),
     );
   }
@@ -43,7 +43,6 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> with TickerProviderStateMixin {
   late TabController _tabController;
-  int value = 1;
 
   @override
   void initState() {
@@ -63,6 +62,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       appBar: AppBar(
         centerTitle: true,
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.graphic_eq, color: Colors.teal[800], size: 30),
             SizedBox(width: 10),
