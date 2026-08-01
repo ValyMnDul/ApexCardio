@@ -1,21 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'themes/light.dart';
 import 'themes/dark.dart';
+
+import 'providers/theme.dart';
 
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
 import 'tabs/settings.dart';
 
 void main() => runApp(
-  MaterialApp(
-    debugShowCheckedModeBanner: false,
-    theme: lightMode,
-    darkTheme: darkMode,
-    themeMode: ThemeMode.light,
-    home: Home(),
+  MultiProvider(
+    providers: [ChangeNotifierProvider(create: (_) => ThemeProvider())],
+    child: App(),
   ),
 );
+
+class App extends StatelessWidget {
+  const App({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = Provider.of<ThemeProvider>(context);
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: lightMode,
+      darkTheme: darkMode,
+      themeMode: provider.darkmode ? ThemeMode.dark : ThemeMode.light,
+      home: Home(),
+    );
+  }
+}
 
 class Home extends StatefulWidget {
   const Home({super.key});
