@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'themes/light.dart';
+import 'themes/dark.dart';
+
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
 import 'tabs/settings.dart';
@@ -7,11 +10,9 @@ import 'tabs/settings.dart';
 void main() => runApp(
   MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorSchemeSeed: Colors.teal,
-      fontFamily: 'Poppins',
-    ),
+    theme: lightMode,
+    darkTheme: darkMode,
+    themeMode: ThemeMode.light,
     home: Home(),
   ),
 );
