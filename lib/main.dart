@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'tabs/live.dart';
+import 'tabs/recordings.dart';
+import 'tabs/settings.dart';
+
 void main() => runApp(
   MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -39,8 +43,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         bottom: TabBar(
           controller: _tabController,
           tabs: [
-            Tab(icon: Icon(Icons.graphic_eq), text: 'Live'),
-            Tab(icon: Icon(Icons.cloud_download_rounded), text: "Recordings"),
+            Tab(icon: Icon(Icons.favorite), text: 'Live'),
+            Tab(icon: Icon(Icons.folder), text: "Recordings"),
             Tab(icon: Icon(Icons.settings), text: "Settings"),
           ],
         ),
@@ -50,47 +54,5 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         children: [Live(), Recordings(), Settings()],
       ),
     );
-  }
-}
-
-class Live extends StatefulWidget {
-  const Live({super.key});
-
-  @override
-  State<Live> createState() => _LiveState();
-}
-
-class _LiveState extends State<Live> {
-  @override
-  Widget build(BuildContext context) {
-    return Container(child: Text("Live"));
-  }
-}
-
-class Recordings extends StatefulWidget {
-  const Recordings({super.key});
-
-  @override
-  State<Recordings> createState() => _RecordingsState();
-}
-
-class _RecordingsState extends State<Recordings> {
-  @override
-  Widget build(BuildContext context) {
-    return Container(child: Text("Recordings"));
-  }
-}
-
-class Settings extends StatefulWidget {
-  const Settings({super.key});
-
-  @override
-  State<Settings> createState() => _SettingsState();
-}
-
-class _SettingsState extends State<Settings> {
-  @override
-  Widget build(BuildContext context) {
-    return Container(child: Text("Settings"));
   }
 }
