@@ -6,6 +6,7 @@ import 'themes/dark.dart';
 
 import 'providers/theme.dart';
 import 'providers/language.dart';
+import 'providers/font.dart';
 
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
@@ -16,6 +17,7 @@ void main() => runApp(
     providers: [
       ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ChangeNotifierProvider(create: (_) => LanguageProvider()),
+      ChangeNotifierProvider(create: (_) => FontScaleProvider()),
     ],
     child: App(),
   ),
@@ -27,12 +29,21 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final fontScaleProvider = Provider.of<FontScaleProvider>(context);
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: lightMode,
       darkTheme: darkMode,
       themeMode: themeProvider.darkmode ? ThemeMode.dark : ThemeMode.light,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(fontScaleProvider.fontScale),
+          ),
+          child: child!,
+        );
+      },
       home: Home(),
     );
   }
@@ -63,6 +74,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final languageProvider = Provider.of<LanguageProvider>(context);
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -80,7 +92,9 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                     text: 'APEX',
                     style: TextStyle(
                       fontWeight: FontWeight.w400,
-                      color: Colors.grey[800],
+                      color: themeProvider.darkmode
+                          ? Colors.teal[100]
+                          : Colors.grey[800],
                     ),
                   ),
                   TextSpan(

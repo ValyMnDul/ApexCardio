@@ -24,6 +24,10 @@ class LanguageProvider extends ChangeNotifier {
       "dark_mode": "Dark Mode",
       "light_mode": "Light Mode",
       "language_title": "App Language",
+      "font_scale_title": "Font Scale",
+      "font_scale_title_small": "Small",
+      "font_scale_title_normal": "Normal",
+      "font_scale_title_big": "Big",
     },
     "RO": {
       "live_tab": "Live",
@@ -33,6 +37,10 @@ class LanguageProvider extends ChangeNotifier {
       "dark_mode": "Mod întunecat",
       "light_mode": "Mod luminos",
       "language_title": "Limbă aplicație",
+      "font_scale_title": "Mărime Font",
+      "font_scale_title_small": "Mic",
+      "font_scale_title_normal": "Normal",
+      "font_scale_title_big": "Mare",
     },
   };
 
