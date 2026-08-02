@@ -5,6 +5,7 @@ import 'themes/light.dart';
 import 'themes/dark.dart';
 
 import 'providers/theme.dart';
+import 'providers/language.dart';
 
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
@@ -12,7 +13,10 @@ import 'tabs/settings.dart';
 
 void main() => runApp(
   MultiProvider(
-    providers: [ChangeNotifierProvider(create: (_) => ThemeProvider())],
+    providers: [
+      ChangeNotifierProvider(create: (_) => ThemeProvider()),
+      ChangeNotifierProvider(create: (_) => LanguageProvider()),
+    ],
     child: App(),
   ),
 );
@@ -58,6 +62,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final languageProvider = Provider.of<LanguageProvider>(context);
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -92,9 +98,18 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         bottom: TabBar(
           controller: _tabController,
           tabs: [
-            Tab(icon: Icon(Icons.favorite), text: 'Live'),
-            Tab(icon: Icon(Icons.folder), text: "Recordings"),
-            Tab(icon: Icon(Icons.settings), text: "Settings"),
+            Tab(
+              icon: Icon(Icons.favorite),
+              text: languageProvider.translate("live_tab"),
+            ),
+            Tab(
+              icon: Icon(Icons.folder),
+              text: languageProvider.translate("recordings_tab"),
+            ),
+            Tab(
+              icon: Icon(Icons.settings),
+              text: languageProvider.translate("settings_tab"),
+            ),
           ],
         ),
       ),
