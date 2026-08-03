@@ -43,6 +43,60 @@ class BleProvider extends ChangeNotifier {
   }
 
   Future<void> stopScan() async {
-    await FlutterBluePlus.startScan();
+    await FlutterBluePlus.stopScan();
+  }
+
+  Future<bool> connectToDevice(BluetoothDevice device) async {
+    try {
+      await stopScan();
+      await device.connect(autoConnect: false, license: License.nonprofit);
+
+      List<BluetoothService> services = await device.discoverServices();
+
+      for (var service in services) {
+        if (service.uuid.toString().toLowerCase() == serviceUuid) {
+          for (var char in service.characteristics) {
+            if (char.uuid.toString().toLowerCase() == characteristicUuid) {
+              _ecgCharacteristic = char;
+            }
+          }
+        }
+      }
+
+      if (_ecgCharacteristic != null) {
+        _connectedDevice = device;
+        _isConnected = true;
+
+        device.connectionState.listen((state) {
+          if (state == BluetoothConnectionState.disconnected) {
+            _handleDisconnect();
+          }
+        });
+
+        notifyListeners();
+        return true;
+      } else {
+        await device.disconnect();
+        return false;
+      }
+    } catch (e) {
+      _handleDisconnect();
+      return false;
+    }
+  }
+
+  Future<void> disconnect() async {
+    if (_connectedDevice != null) {
+      await _connectedDevice!.disconnect();
+    }
+    _handleDisconnect();
+  }
+
+  void _handleDisconnect() {
+    _valueSubscription?.cancel();
+    _connectedDevice = null;
+    _ecgCharacteristic = null;
+    _isConnected = false;
+    notifyListeners();
   }
 }
