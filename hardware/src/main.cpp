@@ -78,8 +78,63 @@ void setup(){
   SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE1));
 
   initADS1292R();
+
+  NimBLEDevice::init("ApexCardio");
+  pServer = NimBLEDevice::createServer();
+  
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+
+  pCaracteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+  );
+
+  pService->start();
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
+
+  Serial.println("READY");
 }
 
 void loop(){
+  static unsigned long lastSampleTime = 0;
 
+  if (millis() - lastSampleTime >= 4) {
+    lastSampleTime = millis();
+
+    static int phase = 0;
+    uint8_t fakeEkgByte = 128;
+
+    phase = (phase + 1) % 250;
+
+    if (phase > 20 && phase < 30) {
+      fakeEkgByte = 220;
+    } else if (phase >= 30 && phase < 40) {
+      fakeEkgByte = 50;  // Unda S
+    }
+
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 0] = 0xC0;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 1] = 0x00;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 2] = 0x00;
+    
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 3] = 0x00;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 4] = fakeEkgByte;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 5] = 0x00;
+    
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 6] = 0x00;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 7] = 0x00;
+    bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 8] = 0x00;
+
+    samplesCounter++;
+
+    if (samplesCounter >= SAMPLES_PER_PACKET) {
+      samplesCounter = 0;
+
+      if (pCaracteristic != nullptr) {
+        pCaracteristic->setValue(bleBuffer, BLE_PACKET_SIZE);
+        pCaracteristic->notify();
+      }
+    }
+  }
 }
