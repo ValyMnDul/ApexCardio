@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/theme.dart';
 import '../providers/language.dart';
 import '../providers/font.dart';
+import '../providers/ble.dart';
 
 class Settings extends StatefulWidget {
   const Settings({super.key});
@@ -13,6 +14,72 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
+  void _showBleScanDialog(BuildContext context) {
+    final bleProvider = Provider.of<BleProvider>(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
+    bleProvider.startScan();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Consumer<BleProvider>(
+          builder: (context, ble, child) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.6,
+              padding: EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        languageProvider.translate("available_devices"),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: bleProvider.isScanning
+                            ? bleProvider.stopScan
+                            : bleProvider.startScan,
+                        icon: Icon(
+                          bleProvider.isScanning ? Icons.stop : Icons.refresh,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (bleProvider.isScanning) LinearProgressIndicator(),
+                  SizedBox(height: 10),
+                  Expanded(
+                    child: bleProvider.scanResults.isEmpty
+                        ? Center(
+                            child: Text(
+                              languageProvider.translate("no_device"),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemBuilder: (context, index) {
+                              final result = ble.scanResults[index];
+                              final isApex =
+                                  result.device.platformName == "ApexCardio";
+                            },
+                            itemCount: bleProvider.scanResults.length,
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);

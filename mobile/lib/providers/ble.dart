@@ -8,7 +8,7 @@ class BleProvider extends ChangeNotifier {
   BluetoothCharacteristic? _ecgCharacteristic;
   bool _isConnected = false;
   bool _isScanning = false;
-  List<ScanResult> _scanResult = [];
+  List<ScanResult> _scanResults = [];
 
   StreamSubscription<List<int>>? _valueSubscription;
 
@@ -17,7 +17,7 @@ class BleProvider extends ChangeNotifier {
 
   bool get isConnected => _isConnected;
   bool get isScanning => _isScanning;
-  List<ScanResult> get scanResult => _scanResult;
+  List<ScanResult> get scanResults => _scanResults;
   String get deviceName => _connectedDevice?.platformName ?? "unknown_device";
   BluetoothCharacteristic? get ecgCaracteristics => _ecgCharacteristic;
 
@@ -28,7 +28,7 @@ class BleProvider extends ChangeNotifier {
     });
 
     FlutterBluePlus.scanResults.listen((results) {
-      _scanResult = results
+      _scanResults = results
           .where((r) => r.device.platformName.isNotEmpty)
           .toList();
 
@@ -37,7 +37,7 @@ class BleProvider extends ChangeNotifier {
   }
 
   Future<void> startScan() async {
-    _scanResult.clear();
+    _scanResults.clear();
     notifyListeners();
     await FlutterBluePlus.startScan(timeout: Duration(seconds: 4));
   }

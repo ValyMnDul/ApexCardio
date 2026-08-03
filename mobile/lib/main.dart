@@ -1,3 +1,4 @@
+import 'package:apexcardio/providers/ble.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -18,6 +19,7 @@ void main() => runApp(
       ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ChangeNotifierProvider(create: (_) => LanguageProvider()),
       ChangeNotifierProvider(create: (_) => FontScaleProvider()),
+      ChangeNotifierProvider(create: (_) => BleProvider()),
     ],
     child: App(),
   ),
