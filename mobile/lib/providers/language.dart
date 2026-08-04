@@ -34,6 +34,9 @@ class LanguageProvider extends ChangeNotifier {
       "ble_search": "Search",
       "available_devices": "Available Devices",
       "ble_connect_to_device": "Connect",
+      "succes_connect": "Successfully connected!",
+      "error_connect": "Connection error!",
+      "no_device": "No devices :(",
     },
     "RO": {
       "live_tab": "Live",
@@ -53,6 +56,9 @@ class LanguageProvider extends ChangeNotifier {
       "ble_search": "Caută",
       "available_devices": "Dispozitive Disponibile",
       "ble_connect_to_device": "Conectează",
+      "succes_connect": "Conectat cu succes!",
+      "error_connect": "Eroare la conectare!",
+      "no_device": "Niciun dispozitiv :(",
     },
   };
 

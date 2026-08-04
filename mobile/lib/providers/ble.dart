@@ -1,7 +1,7 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BleProvider extends ChangeNotifier {
   BluetoothDevice? _connectedDevice;
@@ -37,9 +37,18 @@ class BleProvider extends ChangeNotifier {
   }
 
   Future<void> startScan() async {
-    _scanResults.clear();
-    notifyListeners();
-    await FlutterBluePlus.startScan(timeout: Duration(seconds: 4));
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+
+    if (statuses[Permission.bluetoothScan]?.isGranted == true ||
+        await Permission.bluetoothScan.isGranted) {
+      _scanResults.clear();
+      notifyListeners();
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+    }
   }
 
   Future<void> stopScan() async {

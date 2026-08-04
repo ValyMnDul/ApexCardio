@@ -15,14 +15,18 @@ class Settings extends StatefulWidget {
 
 class _SettingsState extends State<Settings> {
   void _showBleScanDialog(BuildContext context) {
-    final bleProvider = Provider.of<BleProvider>(context);
-    final languageProvider = Provider.of<LanguageProvider>(context);
+    final bleProvider = Provider.of<BleProvider>(context, listen: false);
+    final languageProvider = Provider.of<LanguageProvider>(
+      context,
+      listen: false,
+    );
+
     bleProvider.startScan();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
@@ -30,7 +34,7 @@ class _SettingsState extends State<Settings> {
           builder: (context, ble, child) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.6,
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
                   Row(
@@ -38,31 +42,30 @@ class _SettingsState extends State<Settings> {
                     children: [
                       Text(
                         languageProvider.translate("available_devices"),
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       IconButton(
-                        onPressed: bleProvider.isScanning
-                            ? bleProvider.stopScan
-                            : bleProvider.startScan,
-                        icon: Icon(
-                          bleProvider.isScanning ? Icons.stop : Icons.refresh,
-                        ),
+                        onPressed: ble.isScanning
+                            ? ble.stopScan
+                            : ble.startScan,
+                        icon: Icon(ble.isScanning ? Icons.stop : Icons.refresh),
                       ),
                     ],
                   ),
-                  if (bleProvider.isScanning) LinearProgressIndicator(),
-                  SizedBox(height: 10),
+                  if (ble.isScanning) const LinearProgressIndicator(),
+                  const SizedBox(height: 10),
                   Expanded(
-                    child: bleProvider.scanResults.isEmpty
+                    child: ble.scanResults.isEmpty
                         ? Center(
                             child: Text(
                               languageProvider.translate("no_device"),
                             ),
                           )
                         : ListView.builder(
+                            itemCount: ble.scanResults.length,
                             itemBuilder: (context, index) {
                               final result = ble.scanResults[index];
                               final isApex =
@@ -85,7 +88,28 @@ class _SettingsState extends State<Settings> {
                                   result.device.remoteId.toString(),
                                 ),
                                 trailing: ElevatedButton(
-                                  onPressed: () async {},
+                                  onPressed: () async {
+                                    bool success = await ble.connectToDevice(
+                                      result.device,
+                                    );
+
+                                    if (context.mounted) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            languageProvider.translate(
+                                              success
+                                                  ? "succes_connect"
+                                                  : "error_connect",
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
                                   child: Text(
                                     languageProvider.translate(
                                       "ble_connect_to_device",
@@ -94,7 +118,6 @@ class _SettingsState extends State<Settings> {
                                 ),
                               );
                             },
-                            itemCount: bleProvider.scanResults.length,
                           ),
                   ),
                 ],
@@ -117,7 +140,7 @@ class _SettingsState extends State<Settings> {
 
     return Column(
       children: [
-        SizedBox(height: 10),
+        const SizedBox(height: 10),
         ListTile(
           leading: Icon(
             bleProvider.isConnected
@@ -129,7 +152,7 @@ class _SettingsState extends State<Settings> {
             bleProvider.isConnected
                 ? languageProvider.translate("ble_connected")
                 : languageProvider.translate("ble_disconnected"),
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           subtitle: Text(
             bleProvider.isConnected
@@ -141,7 +164,7 @@ class _SettingsState extends State<Settings> {
                   onPressed: () {
                     bleProvider.disconnect();
                   },
-                  icon: Icon(Icons.close, color: Colors.red),
+                  icon: const Icon(Icons.close, color: Colors.red),
                 )
               : ElevatedButton(
                   onPressed: () {
@@ -167,7 +190,7 @@ class _SettingsState extends State<Settings> {
           leading: Icon(Icons.translate, color: textColor),
           title: Text(languageProvider.translate("language_title")),
           trailing: SegmentedButton(
-            segments: [
+            segments: const [
               ButtonSegment(value: "EN", label: Text("EN")),
               ButtonSegment(value: "RO", label: Text("RO")),
             ],
@@ -181,12 +204,11 @@ class _SettingsState extends State<Settings> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 15.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-
             children: [
               Row(
                 children: [
                   Icon(Icons.text_fields, color: textColor),
-                  SizedBox(width: 16),
+                  const SizedBox(width: 16),
                   Text(
                     languageProvider.translate("font_scale_title"),
                     style: const TextStyle(
@@ -196,8 +218,7 @@ class _SettingsState extends State<Settings> {
                   ),
                 ],
               ),
-              SizedBox(height: 12),
-
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: SegmentedButton<double>(
