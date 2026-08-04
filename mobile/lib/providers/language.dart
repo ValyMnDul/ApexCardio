@@ -19,8 +19,8 @@ class LanguageProvider extends ChangeNotifier {
     "EN": {
       "live_tab": 'Live',
       "recordings_tab": "Recordings",
-      "settings_tab": "Settings",
 
+      "settings_tab": "Settings",
       "dark_mode": "Dark Mode",
       "light_mode": "Light Mode",
       "language_title": "App Language",
@@ -28,12 +28,18 @@ class LanguageProvider extends ChangeNotifier {
       "font_scale_title_small": "Small",
       "font_scale_title_normal": "Normal",
       "font_scale_title_big": "Big",
+      "ble_connected": "Device Connected",
+      "ble_disconnected": "Device Disconnected",
+      "press_to_scan": "Press to scan",
+      "ble_search": "Search",
+      "available_devices": "Available Devices",
+      "ble_connect_to_device": "Connect",
     },
     "RO": {
       "live_tab": "Live",
       "recordings_tab": "Înregistrări",
-      "settings_tab": "Setări",
 
+      "settings_tab": "Setări",
       "dark_mode": "Mod întunecat",
       "light_mode": "Mod luminos",
       "language_title": "Limbă aplicație",
@@ -41,6 +47,12 @@ class LanguageProvider extends ChangeNotifier {
       "font_scale_title_small": "Mic",
       "font_scale_title_normal": "Normal",
       "font_scale_title_big": "Mare",
+      "ble_connected": "Dispozitiv Conectat",
+      "ble_disconnected": "Dispozitiv Deconectat",
+      "press_to_scan": "Apasa pentru a scana",
+      "ble_search": "Caută",
+      "available_devices": "Dispozitive Disponibile",
+      "ble_connect_to_device": "Conectează",
     },
   };
 

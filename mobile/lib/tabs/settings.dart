@@ -67,6 +67,32 @@ class _SettingsState extends State<Settings> {
                               final result = ble.scanResults[index];
                               final isApex =
                                   result.device.platformName == "ApexCardio";
+
+                              return ListTile(
+                                leading: Icon(
+                                  Icons.bluetooth,
+                                  color: isApex ? Colors.blue : Colors.grey,
+                                ),
+                                title: Text(
+                                  result.device.platformName,
+                                  style: TextStyle(
+                                    fontWeight: isApex
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  result.device.remoteId.toString(),
+                                ),
+                                trailing: ElevatedButton(
+                                  onPressed: () async {},
+                                  child: Text(
+                                    languageProvider.translate(
+                                      "ble_connect_to_device",
+                                    ),
+                                  ),
+                                ),
+                              );
                             },
                             itemCount: bleProvider.scanResults.length,
                           ),
@@ -85,12 +111,46 @@ class _SettingsState extends State<Settings> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final languageProvider = Provider.of<LanguageProvider>(context);
     final fontScaleProvider = Provider.of<FontScaleProvider>(context);
+    final bleProvider = Provider.of<BleProvider>(context);
 
     final textColor = Theme.of(context).colorScheme.onSurface;
 
     return Column(
       children: [
         SizedBox(height: 10),
+        ListTile(
+          leading: Icon(
+            bleProvider.isConnected
+                ? Icons.bluetooth_connected
+                : Icons.bluetooth_disabled,
+            color: bleProvider.isConnected ? Colors.green : Colors.red,
+          ),
+          title: Text(
+            bleProvider.isConnected
+                ? languageProvider.translate("ble_connected")
+                : languageProvider.translate("ble_disconnected"),
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text(
+            bleProvider.isConnected
+                ? bleProvider.deviceName
+                : languageProvider.translate("press_to_scan"),
+          ),
+          trailing: bleProvider.isConnected
+              ? IconButton(
+                  onPressed: () {
+                    bleProvider.disconnect();
+                  },
+                  icon: Icon(Icons.close, color: Colors.red),
+                )
+              : ElevatedButton(
+                  onPressed: () {
+                    _showBleScanDialog(context);
+                  },
+                  child: Text(languageProvider.translate("ble_search")),
+                ),
+        ),
+        Divider(thickness: 0.5, color: Colors.grey[600]),
         SwitchListTile(
           title: themeProvider.darkmode
               ? Text(languageProvider.translate("light_mode"))
