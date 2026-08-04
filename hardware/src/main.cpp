@@ -3,6 +3,8 @@
 #include <NimBLEDevice.h>
 #include "ads1292r_registers.h"
 
+#define LED_PIN 2
+
 #define PIN_MISO 19
 #define PIN_MOSI 23
 #define PIN_CLK 18
@@ -28,6 +30,19 @@ bool deviceConnected = false;
 
 #define SERVICE_UUID "12345678-1234-1234-1234-123456789abc"
 #define CHARACTERISTIC_UUID "87654321-4321-4321-4321-cba987654321"
+
+class ServerCallbacks: public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* pServer) override {
+      deviceConnected = true;
+      digitalWrite(LED_PIN, HIGH);
+    };
+
+    void onDisconnect(NimBLEServer* pServer) override {
+      deviceConnected = false;
+      digitalWrite(LED_PIN, LOW);
+      NimBLEDevice::getAdvertising()->start();
+    }
+};
 
 void IRAM_ATTR drdyInterruptHandler(){
   newDataAvailable = true;
@@ -67,6 +82,9 @@ void initADS1292R(){
 void setup(){
   Serial.begin(115200);
 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
   pinMode(PIN_CS, OUTPUT);
   pinMode(PIN_PWDN, OUTPUT);
   digitalWrite(PIN_CS, HIGH);
@@ -81,6 +99,7 @@ void setup(){
 
   NimBLEDevice::init("ApexCardio");
   pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
   
   NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
@@ -111,7 +130,7 @@ void loop(){
     if (phase > 20 && phase < 30) {
       fakeEkgByte = 220;
     } else if (phase >= 30 && phase < 40) {
-      fakeEkgByte = 50;  // Unda S
+      fakeEkgByte = 50;
     }
 
     bleBuffer[samplesCounter * BYTES_PER_SAMPLE + 0] = 0xC0;
@@ -131,7 +150,7 @@ void loop(){
     if (samplesCounter >= SAMPLES_PER_PACKET) {
       samplesCounter = 0;
 
-      if (pCaracteristic != nullptr) {
+      if (deviceConnected && pCaracteristic != nullptr) {
         pCaracteristic->setValue(bleBuffer, BLE_PACKET_SIZE);
         pCaracteristic->notify();
       }
