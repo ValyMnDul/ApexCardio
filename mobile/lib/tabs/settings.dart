@@ -26,7 +26,7 @@ class _SettingsState extends State<Settings> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
@@ -34,7 +34,7 @@ class _SettingsState extends State<Settings> {
           builder: (context, ble, child) {
             return Container(
               height: MediaQuery.of(context).size.height * 0.6,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               child: Column(
                 children: [
                   Row(
@@ -55,8 +55,8 @@ class _SettingsState extends State<Settings> {
                       ),
                     ],
                   ),
-                  if (ble.isScanning) const LinearProgressIndicator(),
-                  const SizedBox(height: 10),
+                  if (ble.isScanning) LinearProgressIndicator(),
+                  SizedBox(height: 10),
                   Expanded(
                     child: ble.scanResults.isEmpty
                         ? Center(
@@ -92,6 +92,10 @@ class _SettingsState extends State<Settings> {
                                     bool success = await ble.connectToDevice(
                                       result.device,
                                     );
+
+                                    if (success) {
+                                      ble.startListeningValues();
+                                    }
 
                                     if (context.mounted) {
                                       Navigator.pop(context);
@@ -247,6 +251,52 @@ class _SettingsState extends State<Settings> {
                     fontScaleProvider.setFontScale(newSelection.first);
                   },
                 ),
+              ),
+              Consumer<BleProvider>(
+                builder: (context, ble, child) {
+                  if (!ble.isConnected) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text(
+                        "Deconectat",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    );
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.all(16.0),
+                    padding: const EdgeInsets.all(12.0),
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.blueAccent),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Date BLE :",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          ble.ecgRawData.isEmpty
+                              ? "Se așteaptă pachete..."
+                              : ble.ecgRawData.toString(),
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 16,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),

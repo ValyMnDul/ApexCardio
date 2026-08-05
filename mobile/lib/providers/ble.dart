@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -21,7 +22,18 @@ class BleProvider extends ChangeNotifier {
   String get deviceName => _connectedDevice?.platformName ?? "unknown_device";
   BluetoothCharacteristic? get ecgCaracteristics => _ecgCharacteristic;
 
+  List<int> _ecgRawData = [];
+  List<int> get ecgRawData => _ecgRawData;
+
   BleProvider() {
+    FlutterBluePlus.adapterState.listen((state) {
+      if (state != BluetoothAdapterState.on) {
+        _isScanning = false;
+        _isConnected = false;
+        _handleDisconnect();
+      }
+    });
+
     FlutterBluePlus.isScanning.listen((scanning) {
       _isScanning = scanning;
       notifyListeners();
@@ -37,18 +49,23 @@ class BleProvider extends ChangeNotifier {
   }
 
   Future<void> startScan() async {
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.location,
-    ].request();
+    if (Platform.isAndroid) {
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.location,
+      ].request();
 
-    if (statuses[Permission.bluetoothScan]?.isGranted == true ||
-        await Permission.bluetoothScan.isGranted) {
-      _scanResults.clear();
-      notifyListeners();
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+      bool hasPermission =
+          statuses[Permission.bluetoothScan]?.isGranted == true ||
+          await Permission.bluetoothScan.isGranted;
+
+      if (!hasPermission) return;
     }
+
+    _scanResults.clear();
+    notifyListeners();
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
   }
 
   Future<void> stopScan() async {
@@ -106,6 +123,18 @@ class BleProvider extends ChangeNotifier {
     _connectedDevice = null;
     _ecgCharacteristic = null;
     _isConnected = false;
+    _ecgRawData = [];
     notifyListeners();
+  }
+
+  void startListeningValues() {
+    if (_ecgCharacteristic == null) return;
+
+    _ecgCharacteristic!.setNotifyValue(true);
+
+    _valueSubscription = _ecgCharacteristic!.lastValueStream.listen((data) {
+      _ecgRawData = data;
+      notifyListeners();
+    });
   }
 }
