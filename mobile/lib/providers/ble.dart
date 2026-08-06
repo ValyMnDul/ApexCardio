@@ -124,6 +124,7 @@ class BleProvider extends ChangeNotifier {
     _ecgCharacteristic = null;
     _isConnected = false;
     _ecgRawData = [];
+    _ecgPoints.clear();
     notifyListeners();
   }
 
@@ -134,7 +135,33 @@ class BleProvider extends ChangeNotifier {
 
     _valueSubscription = _ecgCharacteristic!.lastValueStream.listen((data) {
       _ecgRawData = data;
+
+      for (int i = 0; i + 2 < data.length; i = i + 3) {
+        double sample = parseSample(data[i], data[i + 1], data[i + 2]);
+        addSample(sample);
+      }
+
       notifyListeners();
     });
+  }
+
+  double parseSample(int b1, int b2, int b3) {
+    int raw = (b1 << 16) | (b2 << 8) | b3;
+
+    if ((raw & 0x800000) != 0) {
+      raw |= ~0xFFFFFF;
+    }
+
+    return raw * (2.42 / (0x7FFFFF * 6.0));
+  }
+
+  List<double> _ecgPoints = [];
+  List<double> get ecgPoints => _ecgPoints;
+
+  void addSample(double sample) {
+    _ecgPoints.add(sample);
+    if (_ecgPoints.length > 300) {
+      _ecgPoints.removeAt(0);
+    }
   }
 }
