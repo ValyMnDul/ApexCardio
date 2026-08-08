@@ -155,7 +155,7 @@ class BleProvider extends ChangeNotifier {
     return raw * (2.42 / (0x7FFFFF * 6.0));
   }
 
-  List<double> _ecgPoints = [];
+  final List<double> _ecgPoints = [];
   List<double> get ecgPoints => _ecgPoints;
 
   void addSample(double sample) {
