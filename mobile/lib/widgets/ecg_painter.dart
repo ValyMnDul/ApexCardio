@@ -8,7 +8,7 @@ class EcgPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final gridPaint = Paint()
-      ..color = Colors.green.withOpacity(0.15)
+      ..color = Colors.green.withValues(alpha: 0.15)
       ..strokeWidth = 1.0;
 
     double gridSpacing = 20.0;

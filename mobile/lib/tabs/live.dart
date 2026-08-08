@@ -36,7 +36,25 @@ class _LiveState extends State<Live> {
         ),
       );
     } else {
-      return Column(children: []);
+      return Column(
+        children: [
+          SizedBox(height: 20),
+          Container(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            height: 250,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.teal.shade700, width: 1.5),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: CustomPaint(painter: EcgPainter(bleProvider.ecgPoints)),
+            ),
+          ),
+        ],
+      );
     }
   }
 }
