@@ -133,7 +133,13 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [Live(), Recordings(), Settings()],
+        children: [
+          Live(() {
+            _tabController.animateTo(2);
+          }),
+          Recordings(),
+          Settings(),
+        ],
       ),
     );
   }

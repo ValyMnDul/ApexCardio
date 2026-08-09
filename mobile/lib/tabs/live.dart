@@ -8,7 +8,9 @@ import '../providers/live_ecg.dart';
 import '../widgets/ecg_painter.dart';
 
 class Live extends StatefulWidget {
-  const Live({super.key});
+  final VoidCallback? onGoToSettings;
+
+  const Live(this.onGoToSettings, {super.key});
 
   @override
   State<Live> createState() => _LiveState();
@@ -19,6 +21,7 @@ class _LiveState extends State<Live> {
   Widget build(BuildContext context) {
     final bleProvider = Provider.of<BleProvider>(context);
     final liveEcgProvider = Provider.of<LiveEcgProvider>(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
 
     if (bleProvider.isConnected == false) {
       return Center(
@@ -28,11 +31,14 @@ class _LiveState extends State<Live> {
             Icon(Icons.bluetooth_disabled, size: 64, color: Colors.grey),
             SizedBox(height: 16),
             Text(
-              "No Device Connected",
+              languageProvider.translate("no_device_connected"),
               style: TextStyle(fontSize: 16, color: Colors.grey),
             ),
             SizedBox(height: 60),
-            ElevatedButton(onPressed: () {}, child: Text("Settings")),
+            ElevatedButton(
+              onPressed: widget.onGoToSettings,
+              child: Text(languageProvider.translate("settings_tab")),
+            ),
             SizedBox(height: 50),
           ],
         ),

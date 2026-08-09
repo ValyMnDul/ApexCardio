@@ -37,6 +37,7 @@ class LanguageProvider extends ChangeNotifier {
       "succes_connect": "Successfully connected!",
       "error_connect": "Connection error!",
       "no_device": "No devices :(",
+      "no_device_connected": "No Device Connected",
       "unknown_device": "Unknown Device",
     },
     "RO": {
@@ -60,6 +61,7 @@ class LanguageProvider extends ChangeNotifier {
       "succes_connect": "Conectat cu succes!",
       "error_connect": "Eroare la conectare!",
       "no_device": "Niciun dispozitiv :(",
+      "no_device_connected": "Niciun dispozitiv conectat",
       "unknown_device": "Dispozitiv necunoscut",
     },
     "DE": {},
