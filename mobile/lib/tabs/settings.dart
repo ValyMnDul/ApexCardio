@@ -209,7 +209,7 @@ class _SettingsState extends State<Settings> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.text_fields, color: textColor),
+                  Icon(Icons.translate, color: textColor),
                   SizedBox(width: 16),
                   Text(
                     languageProvider.translate("language_title"),
