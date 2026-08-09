@@ -5,6 +5,7 @@ import '../providers/theme.dart';
 import '../providers/language.dart';
 import '../providers/font.dart';
 import '../providers/ble.dart';
+import '../providers/live_ecg.dart';
 
 class Settings extends StatefulWidget {
   const Settings({super.key});
@@ -139,12 +140,13 @@ class _SettingsState extends State<Settings> {
     final languageProvider = Provider.of<LanguageProvider>(context);
     final fontScaleProvider = Provider.of<FontScaleProvider>(context);
     final bleProvider = Provider.of<BleProvider>(context);
+    final liveEcgProvider = Provider.of<LiveEcgProvider>(context);
 
     final textColor = Theme.of(context).colorScheme.onSurface;
 
     return Column(
       children: [
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         ListTile(
           leading: Icon(
             bleProvider.isConnected
@@ -160,7 +162,9 @@ class _SettingsState extends State<Settings> {
           ),
           subtitle: Text(
             bleProvider.isConnected
-                ? bleProvider.deviceName
+                ? bleProvider.deviceName == "unknown_device"
+                      ? languageProvider.translate("unknown_device")
+                      : bleProvider.deviceName
                 : languageProvider.translate("press_to_scan"),
           ),
           trailing: bleProvider.isConnected
@@ -179,33 +183,65 @@ class _SettingsState extends State<Settings> {
         ),
         Divider(thickness: 0.5, color: Colors.grey[600]),
         SwitchListTile(
-          title: themeProvider.darkmode
-              ? Text(languageProvider.translate("light_mode"))
-              : Text(languageProvider.translate("dark_mode")),
+          title: Text(languageProvider.translate("dark_mode")),
           value: themeProvider.darkmode,
           secondary: themeProvider.darkmode
-              ? Icon(Icons.light_mode, color: textColor)
-              : Icon(Icons.dark_mode, color: textColor),
+              ? Icon(Icons.dark_mode, color: textColor)
+              : Icon(Icons.light_mode, color: textColor),
           onChanged: (value) {
             themeProvider.setDarkMode(value);
           },
         ),
-        ListTile(
-          leading: Icon(Icons.translate, color: textColor),
-          title: Text(languageProvider.translate("language_title")),
-          trailing: SegmentedButton(
-            segments: const [
-              ButtonSegment(value: "EN", label: Text("EN")),
-              ButtonSegment(value: "RO", label: Text("RO")),
+        SwitchListTile(
+          value: liveEcgProvider.showGrid,
+          secondary: Icon(
+            liveEcgProvider.showGrid ? Icons.grid_on : Icons.grid_off,
+          ),
+          title: Text(languageProvider.translate("show_grid_title")),
+          onChanged: (value) {
+            liveEcgProvider.toggleGrid(value);
+          },
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 15.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.text_fields, color: textColor),
+                  SizedBox(width: 16),
+                  Text(
+                    languageProvider.translate("language_title"),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton(
+                  segments: [
+                    ButtonSegment(value: "EN", label: Text("EN")),
+                    ButtonSegment(value: "RO", label: Text("RO")),
+                    ButtonSegment(value: "DE", label: Text("DE")),
+                    ButtonSegment(value: "RU", label: Text("RU")),
+                    ButtonSegment(value: "ES", label: Text("ES")),
+                  ],
+                  selected: {languageProvider.currentLang},
+                  onSelectionChanged: (Set<String> newSelection) {
+                    languageProvider.setLanguage(newSelection.first);
+                  },
+                ),
+              ),
             ],
-            selected: {languageProvider.currentLang},
-            onSelectionChanged: (Set<String> newSelection) {
-              languageProvider.setLanguage(newSelection.first);
-            },
           ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 15.0),
+          padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -222,7 +258,7 @@ class _SettingsState extends State<Settings> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: SegmentedButton<double>(
@@ -251,52 +287,6 @@ class _SettingsState extends State<Settings> {
                     fontScaleProvider.setFontScale(newSelection.first);
                   },
                 ),
-              ),
-              Consumer<BleProvider>(
-                builder: (context, ble, child) {
-                  if (!ble.isConnected) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Text(
-                        "Deconectat",
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    );
-                  }
-
-                  return Container(
-                    margin: const EdgeInsets.all(16.0),
-                    padding: const EdgeInsets.all(12.0),
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.blueAccent),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Date BLE :",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          ble.ecgRawData.isEmpty
-                              ? "Se așteaptă pachete..."
-                              : ble.ecgRawData.toString(),
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 16,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
               ),
             ],
           ),

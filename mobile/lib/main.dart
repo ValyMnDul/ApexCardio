@@ -1,4 +1,5 @@
 import 'package:apexcardio/providers/ble.dart';
+import 'package:apexcardio/providers/live_ecg.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -20,6 +21,7 @@ void main() => runApp(
       ChangeNotifierProvider(create: (_) => LanguageProvider()),
       ChangeNotifierProvider(create: (_) => FontScaleProvider()),
       ChangeNotifierProvider(create: (_) => BleProvider()),
+      ChangeNotifierProvider(create: (_) => LiveEcgProvider()),
     ],
     child: App(),
   ),

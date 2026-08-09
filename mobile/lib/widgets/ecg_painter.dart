@@ -2,21 +2,24 @@ import 'package:flutter/material.dart';
 
 class EcgPainter extends CustomPainter {
   final List<double> points;
+  bool showGrid;
 
-  EcgPainter(this.points);
+  EcgPainter(this.points, this.showGrid);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..color = Colors.green.withValues(alpha: 0.15)
-      ..strokeWidth = 1.0;
+    if (showGrid == true) {
+      final gridPaint = Paint()
+        ..color = Colors.green.withValues(alpha: 0.15)
+        ..strokeWidth = 1.0;
 
-    double gridSpacing = 20.0;
-    for (double x = 0; x < size.width; x = x + gridSpacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-    for (double y = 0; y < size.height; y = y + gridSpacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      double gridSpacing = 20.0;
+      for (double x = 0; x < size.width; x = x + gridSpacing) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+      }
+      for (double y = 0; y < size.height; y = y + gridSpacing) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      }
     }
 
     final ecgPaint = Paint()

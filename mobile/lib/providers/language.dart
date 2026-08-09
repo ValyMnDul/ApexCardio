@@ -22,7 +22,7 @@ class LanguageProvider extends ChangeNotifier {
 
       "settings_tab": "Settings",
       "dark_mode": "Dark Mode",
-      "light_mode": "Light Mode",
+      "show_grid_title": "Show Grid",
       "language_title": "App Language",
       "font_scale_title": "Font Scale",
       "font_scale_title_small": "Small",
@@ -37,6 +37,7 @@ class LanguageProvider extends ChangeNotifier {
       "succes_connect": "Successfully connected!",
       "error_connect": "Connection error!",
       "no_device": "No devices :(",
+      "unknown_device": "Unknown Device",
     },
     "RO": {
       "live_tab": "Live",
@@ -44,7 +45,7 @@ class LanguageProvider extends ChangeNotifier {
 
       "settings_tab": "Setări",
       "dark_mode": "Mod întunecat",
-      "light_mode": "Mod luminos",
+      "show_grid_title": "Arată grila",
       "language_title": "Limbă aplicație",
       "font_scale_title": "Mărime Font",
       "font_scale_title_small": "Mic",
@@ -59,7 +60,11 @@ class LanguageProvider extends ChangeNotifier {
       "succes_connect": "Conectat cu succes!",
       "error_connect": "Eroare la conectare!",
       "no_device": "Niciun dispozitiv :(",
+      "unknown_device": "Dispozitiv necunoscut",
     },
+    "DE": {},
+    "RU": {},
+    "ES": {},
   };
 
   String translate(String key) {

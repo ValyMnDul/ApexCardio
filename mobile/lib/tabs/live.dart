@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/ble.dart';
 import '../providers/language.dart';
+import '../providers/live_ecg.dart';
 
 import '../widgets/ecg_painter.dart';
 
@@ -17,6 +18,7 @@ class _LiveState extends State<Live> {
   @override
   Widget build(BuildContext context) {
     final bleProvider = Provider.of<BleProvider>(context);
+    final liveEcgProvider = Provider.of<LiveEcgProvider>(context);
 
     if (bleProvider.isConnected == false) {
       return Center(
@@ -50,7 +52,12 @@ class _LiveState extends State<Live> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: CustomPaint(painter: EcgPainter(bleProvider.ecgPoints)),
+              child: CustomPaint(
+                painter: EcgPainter(
+                  bleProvider.ecgPoints,
+                  liveEcgProvider.showGrid,
+                ),
+              ),
             ),
           ),
         ],
