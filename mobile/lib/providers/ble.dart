@@ -136,8 +136,13 @@ class BleProvider extends ChangeNotifier {
     _valueSubscription = _ecgCharacteristic!.lastValueStream.listen((data) {
       _ecgRawData = data;
 
-      for (int i = 0; i + 2 < data.length; i = i + 3) {
-        double sample = parseSample(data[i], data[i + 1], data[i + 2]);
+      for (int offset = 0; offset + 8 < data.length; offset = offset + 9) {
+        double sample = parseSample(
+          data[offset + 3],
+          data[offset + 4],
+          data[offset + 5],
+        );
+
         addSample(sample);
       }
 
@@ -146,13 +151,13 @@ class BleProvider extends ChangeNotifier {
   }
 
   double parseSample(int b1, int b2, int b3) {
-    int raw = (b1 << 16) | (b2 << 8) | b3;
+    int raw = ((b1 & 0xFF) << 16) | ((b2 & 0xFF) << 8) | (b3 & 0xFF);
 
     if ((raw & 0x800000) != 0) {
-      raw |= ~0xFFFFFF;
+      raw -= 0x1000000;
     }
 
-    return raw * (2.42 / (0x7FFFFF * 6.0));
+    return raw.toDouble();
   }
 
   final List<double> _ecgPoints = [];

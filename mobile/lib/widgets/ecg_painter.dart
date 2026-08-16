@@ -37,7 +37,11 @@ class EcgPainter extends CustomPainter {
 
     for (int i = 0; i < points.length; i++) {
       double x = i * dx;
-      double y = centerY - (points[i] * 1000);
+
+      const double displayRange = 8050.0;
+      double normalizrd = points[i] / displayRange;
+
+      double y = centerY - normalizrd * (size.height / 2);
 
       if (i == 0) {
         path.moveTo(x, y);
