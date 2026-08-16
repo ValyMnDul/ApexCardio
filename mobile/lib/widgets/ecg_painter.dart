@@ -2,46 +2,60 @@ import 'package:flutter/material.dart';
 
 class EcgPainter extends CustomPainter {
   final List<double> points;
-  bool showGrid;
+  final bool showGrid;
 
   EcgPainter(this.points, this.showGrid);
 
+  static const double displayRange = 8050.0;
+
+  static const int maxPoints = 300;
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (showGrid == true) {
+    if (showGrid) {
       final gridPaint = Paint()
         ..color = Colors.green.withValues(alpha: 0.15)
         ..strokeWidth = 1.0;
 
-      double gridSpacing = 20.0;
-      for (double x = 0; x < size.width; x = x + gridSpacing) {
+      const double gridSpacing = 20.0;
+
+      for (double x = 0; x < size.width; x += gridSpacing) {
         canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
       }
-      for (double y = 0; y < size.height; y = y + gridSpacing) {
+
+      for (double y = 0; y < size.height; y += gridSpacing) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
       }
+    }
+
+    if (points.length < 2) {
+      return;
     }
 
     final ecgPaint = Paint()
       ..color = Colors.greenAccent
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    if (points.isEmpty) return;
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
 
     final path = Path();
 
-    double dx = size.width / 300;
     double centerY = size.height / 2;
 
+    double halfHeight = size.height / 2;
+
+    double dx = size.width / (maxPoints - 1);
+
     for (int i = 0; i < points.length; i++) {
+      double value = points[i].clamp(-displayRange, displayRange).toDouble();
+
+      double normalized = value / displayRange;
+
       double x = i * dx;
 
-      const double displayRange = 8050.0;
-      double normalizrd = points[i] / displayRange;
-
-      double y = centerY - normalizrd * (size.height / 2);
+      double y = centerY - normalized * halfHeight;
 
       if (i == 0) {
         path.moveTo(x, y);
@@ -49,6 +63,7 @@ class EcgPainter extends CustomPainter {
         path.lineTo(x, y);
       }
     }
+
     canvas.drawPath(path, ecgPaint);
   }
 

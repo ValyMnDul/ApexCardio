@@ -31,6 +31,7 @@
 #define DETECTOR_CALIBRATION 500
 
 #define LED_PIN 2
+
 #define SAMPLES_PER_PACKET 10
 #define BYTES_PER_SAMPLE 9
 #define BLE_PACKET_SIZE (SAMPLES_PER_PACKET * BYTES_PER_SAMPLE)
@@ -38,7 +39,11 @@
 #define SERVICE_UUID "12345678-1234-1234-1234-123456789abc"
 #define CHARACTERISTIC_UUID "87654321-4321-4321-4321-cba987654321"
 
-SPISettings adsSPI(100000, MSBFIRST, SPI_MODE1);
+SPISettings adsSPI(
+    100000,
+    MSBFIRST,
+    SPI_MODE1
+);
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(
     U8G2_R0,
@@ -77,6 +82,12 @@ uint8_t pendingPixels[16];
 int pendingCount = 0;
 
 float morphSlow = 0.0f;
+
+struct SensorSample
+{
+    float ecg;
+    int32_t respiration;
+};
 
 volatile float bpmValue = 0.0f;
 volatile uint32_t beatCount = 0;
@@ -227,7 +238,7 @@ const int startupCount =
     sizeof(startupECG) /
     sizeof(startupECG[0]);
 
-class ServerCallbacks: public NimBLEServerCallbacks
+class ServerCallbacks : public NimBLEServerCallbacks
 {
     void onConnect(NimBLEServer* pServer) override
     {
@@ -239,11 +250,15 @@ class ServerCallbacks: public NimBLEServerCallbacks
     {
         deviceConnected = false;
         digitalWrite(LED_PIN, LOW);
+
         NimBLEDevice::getAdvertising()->start();
     }
 };
 
-void pack24(int32_t value, uint8_t* output)
+void pack24(
+    int32_t value,
+    uint8_t* output
+)
 {
     if (value > 8388607)
         value = 8388607;
@@ -268,7 +283,10 @@ void pack24(int32_t value, uint8_t* output)
         0xFF;
 }
 
-void sendBLESample(float displayedECG)
+void sendBLESample(
+    float displayedECG,
+    int32_t respirationRaw
+)
 {
     int offset =
         bleSamplesCounter *
@@ -283,17 +301,24 @@ void sendBLESample(float displayedECG)
         &bleBuffer[offset + 3]
     );
 
-    bleBuffer[offset + 6] = 0x00;
-    bleBuffer[offset + 7] = 0x00;
-    bleBuffer[offset + 8] = 0x00;
+    pack24(
+        respirationRaw,
+        &bleBuffer[offset + 6]
+    );
 
     bleSamplesCounter++;
 
-    if (bleSamplesCounter >= SAMPLES_PER_PACKET)
+    if (
+        bleSamplesCounter >=
+        SAMPLES_PER_PACKET
+    )
     {
         bleSamplesCounter = 0;
 
-        if (deviceConnected && pCaracteristic != nullptr)
+        if (
+            deviceConnected &&
+            pCaracteristic != nullptr
+        )
         {
             pCaracteristic->setValue(
                 bleBuffer,
@@ -307,7 +332,9 @@ void sendBLESample(float displayedECG)
 
 void initBLE()
 {
-    NimBLEDevice::init("ApexCardio");
+    NimBLEDevice::init(
+        "ApexCardio"
+    );
 
     pServer =
         NimBLEDevice::createServer();
@@ -343,10 +370,15 @@ void initBLE()
 void adsCommand(uint8_t cmd)
 {
     digitalWrite(PIN_CS, LOW);
+
     delayMicroseconds(10);
+
     SPI.transfer(cmd);
+
     delayMicroseconds(20);
+
     digitalWrite(PIN_CS, HIGH);
+
     delayMicroseconds(20);
 }
 
@@ -354,21 +386,32 @@ void adsReset()
 {
     digitalWrite(PIN_RESET, HIGH);
     delay(10);
+
     digitalWrite(PIN_RESET, LOW);
     delay(10);
+
     digitalWrite(PIN_RESET, HIGH);
     delay(200);
 }
 
-void writeRegister(uint8_t reg, uint8_t value)
+void writeRegister(
+    uint8_t reg,
+    uint8_t value
+)
 {
     digitalWrite(PIN_CS, LOW);
+
     delayMicroseconds(10);
 
     SPI.transfer(CMD_SDATAC);
+
     delayMicroseconds(100);
 
-    SPI.transfer(CMD_WREG | reg);
+    SPI.transfer(
+        CMD_WREG |
+        reg
+    );
+
     SPI.transfer(0x00);
 
     delayMicroseconds(100);
@@ -382,20 +425,29 @@ void writeRegister(uint8_t reg, uint8_t value)
     delay(2);
 }
 
-uint8_t readRegister(uint8_t reg)
+uint8_t readRegister(
+    uint8_t reg
+)
 {
     digitalWrite(PIN_CS, LOW);
+
     delayMicroseconds(10);
 
     SPI.transfer(CMD_SDATAC);
+
     delayMicroseconds(100);
 
-    SPI.transfer(CMD_RREG | reg);
+    SPI.transfer(
+        CMD_RREG |
+        reg
+    );
+
     SPI.transfer(0x00);
 
     delayMicroseconds(100);
 
-    uint8_t value = SPI.transfer(0x00);
+    uint8_t value =
+        SPI.transfer(0x00);
 
     delayMicroseconds(10);
 
@@ -404,7 +456,11 @@ uint8_t readRegister(uint8_t reg)
     return value;
 }
 
-int32_t make24(uint8_t a, uint8_t b, uint8_t c)
+int32_t make24(
+    uint8_t a,
+    uint8_t b,
+    uint8_t c
+)
 {
     int32_t value =
         ((int32_t)a << 16) |
@@ -412,12 +468,16 @@ int32_t make24(uint8_t a, uint8_t b, uint8_t c)
         c;
 
     if (value & 0x800000)
+    {
         value |= 0xFF000000;
+    }
 
     return value;
 }
 
-float shapeForDisplay(float ecg)
+float shapeForDisplay(
+    float ecg
+)
 {
     morphSlow +=
         0.08f *
@@ -425,10 +485,13 @@ float shapeForDisplay(float ecg)
 
     return
         ecg -
-        0.08f * morphSlow;
+        0.08f *
+        morphSlow;
 }
 
-uint8_t ecgToPixel(float value)
+uint8_t ecgToPixel(
+    float value
+)
 {
     if (value > DISPLAY_RANGE)
         value = DISPLAY_RANGE;
@@ -441,7 +504,8 @@ uint8_t ecgToPixel(float value)
         DISPLAY_RANGE;
 
     int halfHeight =
-        (PLOT_BOTTOM - PLOT_TOP) / 2;
+        (PLOT_BOTTOM - PLOT_TOP) /
+        2;
 
     int y =
         PLOT_CENTER -
@@ -457,7 +521,10 @@ uint8_t ecgToPixel(float value)
     );
 }
 
-void drawHeartOutline(int x, int y)
+void drawHeartOutline(
+    int x,
+    int y
+)
 {
     u8g2.drawCircle(
         x + 2,
@@ -486,7 +553,10 @@ void drawHeartOutline(int x, int y)
     );
 }
 
-void drawHeartFilled(int x, int y)
+void drawHeartFilled(
+    int x,
+    int y
+)
 {
     u8g2.drawDisc(
         x + 2,
@@ -517,9 +587,19 @@ void drawTopInfo()
         heartFlashUntil;
 
     if (flash)
-        drawHeartFilled(2, 1);
+    {
+        drawHeartFilled(
+            2,
+            1
+        );
+    }
     else
-        drawHeartOutline(2, 1);
+    {
+        drawHeartOutline(
+            2,
+            1
+        );
+    }
 
     u8g2.setFont(
         u8g2_font_6x10_tf
@@ -574,7 +654,8 @@ void drawTopInfo()
         countBuf,
         sizeof(countBuf),
         "%lu",
-        (unsigned long)beatCount
+        (unsigned long)
+        beatCount
     );
 
     int width =
@@ -595,7 +676,9 @@ void drawTopInfo()
     );
 }
 
-void updateBPM(uint32_t rrSamples)
+void updateBPM(
+    uint32_t rrSamples
+)
 {
     if (
         rrSamples < 75 ||
@@ -608,15 +691,24 @@ void updateBPM(uint32_t rrSamples)
     rrHistory[
         rrIndex
     ] =
-        (uint16_t)rrSamples;
+        (uint16_t)
+        rrSamples;
 
     rrIndex++;
 
-    if (rrIndex >= 5)
+    if (
+        rrIndex >= 5
+    )
+    {
         rrIndex = 0;
+    }
 
-    if (rrCount < 5)
+    if (
+        rrCount < 5
+    )
+    {
         rrCount++;
+    }
 
     uint16_t temp[5];
 
@@ -661,14 +753,15 @@ void updateBPM(uint32_t rrSamples)
 
     float rr;
 
-    if (rrCount == 1)
+    if (
+        rrCount == 1
+    )
     {
         rr =
             temp[0];
     }
     else if (
-        rrCount % 2
-        ==
+        rrCount % 2 ==
         1
     )
     {
@@ -847,7 +940,8 @@ void processQRSDetector(
 
     float mwi =
         mwiSum /
-        (float)MWI_SIZE;
+        (float)
+        MWI_SIZE;
 
     float slope =
         getMaxSlope();
@@ -856,8 +950,7 @@ void processQRSDetector(
 
     bool localPeak =
         mwiPrev1 >
-        mwiPrev2
-        &&
+        mwiPrev2 &&
         mwiPrev1 >=
         mwi;
 
@@ -886,8 +979,7 @@ void processQRSDetector(
         )
         {
             float meanPeak =
-                calibrationPeaks >
-                0
+                calibrationPeaks > 0
                 ?
                 calibrationSum /
                 calibrationPeaks
@@ -922,11 +1014,15 @@ void processQRSDetector(
                     noiseLevel
                 );
 
-            detectorReady = true;
+            detectorReady =
+                true;
         }
 
-        mwiPrev2 = mwiPrev1;
-        mwiPrev1 = mwi;
+        mwiPrev2 =
+            mwiPrev1;
+
+        mwiPrev1 =
+            mwi;
 
         slopePrev2 =
             slopePrev1;
@@ -950,8 +1046,7 @@ void processQRSDetector(
             1;
 
         uint32_t distance =
-            lastQrsSample ==
-            0
+            lastQrsSample == 0
             ?
             1000000
             :
@@ -959,40 +1054,24 @@ void processQRSDetector(
             lastQrsSample;
 
         bool refractory =
-            lastQrsSample !=
-            0
-            &&
-            distance <
-            60;
+            lastQrsSample != 0 &&
+            distance < 60;
 
         bool possibleTWave =
-            lastQrsSample !=
-            0
-            &&
-            distance <
-            90
-            &&
-            lastQrsSlope >
-            0
-            &&
+            lastQrsSample != 0 &&
+            distance < 90 &&
+            lastQrsSlope > 0 &&
             candidateSlope <
             lastQrsSlope *
             0.50f;
 
         bool earlyLowSlope =
-            lastQrsSample !=
-            0
-            &&
-            averageRR >
-            0
-            &&
+            lastQrsSample != 0 &&
+            averageRR > 0 &&
             distance <
             averageRR *
-            0.62f
-            &&
-            lastQrsSlope >
-            0
-            &&
+            0.62f &&
+            lastQrsSlope > 0 &&
             candidateSlope <
             lastQrsSlope *
             0.70f;
@@ -1007,12 +1086,9 @@ void processQRSDetector(
 
         if (
             peak >
-            detectionThreshold
-            &&
-            !refractory
-            &&
-            !possibleTWave
-            &&
+            detectionThreshold &&
+            !refractory &&
+            !possibleTWave &&
             !earlyLowSlope
         )
         {
@@ -1072,11 +1148,18 @@ void drawStartupWave(
     const int x0 = 8;
     const int x1 = 120;
     const int baseline = 35;
-    const float verticalScale = 0.80f;
+
+    const float verticalScale =
+        0.80f;
 
     float dx =
-        (float)(x1 - x0) /
-        (float)(startupCount - 1);
+        (float)(
+            x1 - x0
+        )
+        /
+        (float)(
+            startupCount - 1
+        );
 
     int previousX =
         x0;
@@ -1098,7 +1181,8 @@ void drawStartupWave(
         int x =
             x0 +
             (int)(
-                dx * i
+                dx *
+                i
             );
 
         int y =
@@ -1115,14 +1199,17 @@ void drawStartupWave(
             y
         );
 
-        previousX = x;
-        previousY = y;
+        previousX =
+            x;
+
+        previousY =
+            y;
     }
 }
 
 void bootAnimation()
 {
-    const char *title =
+    const char* title =
         "ApexCardio";
 
     for (
@@ -1143,7 +1230,12 @@ void bootAnimation()
             );
 
         u8g2.drawStr(
-            (128 - textWidth) / 2,
+            (
+                128 -
+                textWidth
+            )
+            /
+            2,
             17,
             title
         );
@@ -1177,7 +1269,9 @@ void bootAnimation()
                 78
             );
 
-        if (progress > 0)
+        if (
+            progress > 0
+        )
         {
             u8g2.drawBox(
                 25,
@@ -1194,7 +1288,7 @@ void bootAnimation()
 }
 
 void showMessage(
-    const char *msg
+    const char* msg
 )
 {
     u8g2.clearBuffer();
@@ -1209,7 +1303,12 @@ void showMessage(
         );
 
     u8g2.drawStr(
-        (128 - w) / 2,
+        (
+            128 -
+            w
+        )
+        /
+        2,
         36,
         msg
     );
@@ -1233,11 +1332,15 @@ void IRAM_ATTR drdyISR()
         );
 
         if (wake)
+        {
             portYIELD_FROM_ISR();
+        }
     }
 }
 
-void adcTask(void *parameter)
+void adcTask(
+    void* parameter
+)
 {
     uint32_t warmup = 0;
 
@@ -1249,7 +1352,9 @@ void adcTask(void *parameter)
         );
 
         if (!adcRunning)
+        {
             continue;
+        }
 
         SPI.beginTransaction(
             adsSPI
@@ -1262,23 +1367,28 @@ void adcTask(void *parameter)
 
         delayMicroseconds(5);
 
-        uint8_t s1 =
+        uint8_t status1 =
             SPI.transfer(0x00);
 
         SPI.transfer(0x00);
         SPI.transfer(0x00);
 
-        SPI.transfer(0x00);
-        SPI.transfer(0x00);
-        SPI.transfer(0x00);
-
-        uint8_t a =
+        uint8_t respA =
             SPI.transfer(0x00);
 
-        uint8_t b =
+        uint8_t respB =
             SPI.transfer(0x00);
 
-        uint8_t c =
+        uint8_t respC =
+            SPI.transfer(0x00);
+
+        uint8_t ecgA =
+            SPI.transfer(0x00);
+
+        uint8_t ecgB =
+            SPI.transfer(0x00);
+
+        uint8_t ecgC =
             SPI.transfer(0x00);
 
         digitalWrite(
@@ -1289,7 +1399,10 @@ void adcTask(void *parameter)
         SPI.endTransaction();
 
         if (
-            (s1 & 0xF0)
+            (
+                status1 &
+                0xF0
+            )
             !=
             0xC0
         )
@@ -1297,11 +1410,18 @@ void adcTask(void *parameter)
             continue;
         }
 
+        int32_t respirationRaw =
+            make24(
+                respA,
+                respB,
+                respC
+            );
+
         int32_t raw =
             make24(
-                a,
-                b,
-                c
+                ecgA,
+                ecgB,
+                ecgC
             );
 
         if (
@@ -1314,7 +1434,8 @@ void adcTask(void *parameter)
 
         float ecg =
             highPass.process(
-                (float)raw
+                (float)
+                raw
             );
 
         ecg =
@@ -1328,11 +1449,11 @@ void adcTask(void *parameter)
             );
 
         if (
-            warmup <
-            300
+            warmup < 300
         )
         {
             warmup++;
+
             continue;
         }
 
@@ -1340,17 +1461,25 @@ void adcTask(void *parameter)
             ecg
         );
 
+        SensorSample sample;
+
+        sample.ecg =
+            ecg;
+
+        sample.respiration =
+            respirationRaw;
+
         if (
             xQueueSend(
                 ecgQueue,
-                &ecg,
+                &sample,
                 0
             )
             !=
             pdTRUE
         )
         {
-            float oldValue;
+            SensorSample oldValue;
 
             xQueueReceive(
                 ecgQueue,
@@ -1360,7 +1489,7 @@ void adcTask(void *parameter)
 
             xQueueSend(
                 ecgQueue,
-                &ecg,
+                &sample,
                 0
             );
         }
@@ -1368,7 +1497,8 @@ void adcTask(void *parameter)
 }
 
 void createDisplayPixel(
-    float ecg
+    float ecg,
+    int32_t respirationRaw
 )
 {
     float displayedECG =
@@ -1377,7 +1507,8 @@ void createDisplayPixel(
         );
 
     sendBLESample(
-        displayedECG
+        displayedECG,
+        respirationRaw
     );
 
     pixelSamples[
@@ -1397,10 +1528,12 @@ void createDisplayPixel(
 
     float pixelValue =
         pixelSamples[
-            PIXEL_DECIMATION / 2
+            PIXEL_DECIMATION /
+            2
         ];
 
-    pixelSampleCount = 0;
+    pixelSampleCount =
+        0;
 
     uint8_t y =
         ecgToPixel(
@@ -1414,7 +1547,8 @@ void createDisplayPixel(
     {
         pendingPixels[
             pendingCount
-        ] = y;
+        ] =
+            y;
 
         pendingCount++;
     }
@@ -1432,13 +1566,19 @@ void scrollWave()
     int shift =
         pendingCount;
 
-    if (shift > 8)
+    if (
+        shift > 8
+    )
+    {
         shift = 8;
+    }
 
     memmove(
         screenWave,
-        screenWave + shift,
-        DISP_W - shift
+        screenWave +
+        shift,
+        DISP_W -
+        shift
     );
 
     for (
@@ -1462,8 +1602,10 @@ void scrollWave()
     {
         memmove(
             pendingPixels,
-            pendingPixels + shift,
-            pendingCount - shift
+            pendingPixels +
+            shift,
+            pendingCount -
+            shift
         );
     }
 
@@ -1496,7 +1638,8 @@ void renderFrame()
             y
         );
 
-        previousY = y;
+        previousY =
+            y;
     }
 
     u8g2.sendBuffer();
@@ -1504,12 +1647,21 @@ void renderFrame()
 
 void setup()
 {
-    Serial.begin(115200);
+    Serial.begin(
+        115200
+    );
 
     delay(300);
 
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+    pinMode(
+        LED_PIN,
+        OUTPUT
+    );
+
+    digitalWrite(
+        LED_PIN,
+        LOW
+    );
 
     Wire.begin(
         OLED_SDA,
@@ -1528,19 +1680,65 @@ void setup()
         "SYNC"
     );
 
-    pinMode(PIN_SCK, OUTPUT);
-    pinMode(PIN_MISO, INPUT);
-    pinMode(PIN_MOSI, OUTPUT);
-    pinMode(PIN_CS, OUTPUT);
-    pinMode(PIN_DRDY, INPUT);
-    pinMode(PIN_START, OUTPUT);
-    pinMode(PIN_RESET, OUTPUT);
+    pinMode(
+        PIN_SCK,
+        OUTPUT
+    );
 
-    digitalWrite(PIN_CS, HIGH);
-    digitalWrite(PIN_SCK, LOW);
-    digitalWrite(PIN_MOSI, LOW);
-    digitalWrite(PIN_START, LOW);
-    digitalWrite(PIN_RESET, HIGH);
+    pinMode(
+        PIN_MISO,
+        INPUT
+    );
+
+    pinMode(
+        PIN_MOSI,
+        OUTPUT
+    );
+
+    pinMode(
+        PIN_CS,
+        OUTPUT
+    );
+
+    pinMode(
+        PIN_DRDY,
+        INPUT
+    );
+
+    pinMode(
+        PIN_START,
+        OUTPUT
+    );
+
+    pinMode(
+        PIN_RESET,
+        OUTPUT
+    );
+
+    digitalWrite(
+        PIN_CS,
+        HIGH
+    );
+
+    digitalWrite(
+        PIN_SCK,
+        LOW
+    );
+
+    digitalWrite(
+        PIN_MOSI,
+        LOW
+    );
+
+    digitalWrite(
+        PIN_START,
+        LOW
+    );
+
+    digitalWrite(
+        PIN_RESET,
+        HIGH
+    );
 
     SPI.begin(
         PIN_SCK,
@@ -1560,7 +1758,9 @@ void setup()
             0x00
         );
 
-    if (id != 0x73)
+    if (
+        id != 0x73
+    )
     {
         showMessage(
             "ADS FAILED"
@@ -1569,7 +1769,9 @@ void setup()
         SPI.endTransaction();
 
         while (true)
+        {
             delay(1000);
+        }
     }
 
     adsCommand(
@@ -1578,24 +1780,86 @@ void setup()
 
     delay(20);
 
-    writeRegister(0x01, 0x01);
-    writeRegister(0x02, 0xA0);
-    writeRegister(0x03, 0x10);
-    writeRegister(0x04, 0x81);
-    writeRegister(0x05, 0x60);
-    writeRegister(0x06, 0x2C);
-    writeRegister(0x07, 0x00);
-    writeRegister(0x09, 0x02);
-    writeRegister(0x0A, 0x03);
+    writeRegister(
+        0x01,
+        0x01
+    );
+
+    writeRegister(
+        0x02,
+        0xA0
+    );
+
+    writeRegister(
+        0x03,
+        0x10
+    );
+
+    writeRegister(
+        0x04,
+        0x30
+    );
+
+    writeRegister(
+        0x05,
+        0x60
+    );
+
+    writeRegister(
+        0x06,
+        0x2C
+    );
+
+    writeRegister(
+        0x07,
+        0x00
+    );
+
+    writeRegister(
+        0x09,
+        0xEA
+    );
+
+    writeRegister(
+        0x0A,
+        0x03
+    );
 
     bool configOK =
-        readRegister(0x01) == 0x01 &&
-        readRegister(0x02) == 0xA0 &&
-        readRegister(0x04) == 0x81 &&
-        readRegister(0x05) == 0x60 &&
-        readRegister(0x06) == 0x2C &&
-        readRegister(0x09) == 0x02 &&
-        readRegister(0x0A) == 0x03;
+        readRegister(
+            0x01
+        ) ==
+        0x01
+        &&
+        readRegister(
+            0x02
+        ) ==
+        0xA0
+        &&
+        readRegister(
+            0x04
+        ) ==
+        0x30
+        &&
+        readRegister(
+            0x05
+        ) ==
+        0x60
+        &&
+        readRegister(
+            0x06
+        ) ==
+        0x2C
+        &&
+        readRegister(
+            0x09
+        ) ==
+        0xEA
+        &&
+        readRegister(
+            0x0A
+        ) ==
+        0x03;
 
     if (!configOK)
     {
@@ -1606,7 +1870,9 @@ void setup()
         SPI.endTransaction();
 
         while (true)
+        {
             delay(1000);
+        }
     }
 
     SPI.endTransaction();
@@ -1619,7 +1885,8 @@ void setup()
         i++
     )
     {
-        mwiBuffer[i] = 0;
+        mwiBuffer[i] =
+            0;
     }
 
     for (
@@ -1628,7 +1895,8 @@ void setup()
         i++
     )
     {
-        slopeBuffer[i] = 0;
+        slopeBuffer[i] =
+            0;
     }
 
     for (
@@ -1644,7 +1912,9 @@ void setup()
     ecgQueue =
         xQueueCreate(
             128,
-            sizeof(float)
+            sizeof(
+                SensorSample
+            )
         );
 
     xTaskCreatePinnedToCore(
@@ -1683,19 +1953,20 @@ void setup()
 
     SPI.endTransaction();
 
-    adcRunning = true;
+    adcRunning =
+        true;
 
     renderFrame();
 }
 
 void loop()
 {
-    float ecg;
+    SensorSample sample;
 
     while (
         xQueueReceive(
             ecgQueue,
-            &ecg,
+            &sample,
             0
         )
         ==
@@ -1703,12 +1974,13 @@ void loop()
     )
     {
         createDisplayPixel(
-            ecg
+            sample.ecg,
+            sample.respiration
         );
     }
 
-    static unsigned long
-        lastFrame = 0;
+    static unsigned long lastFrame =
+        0;
 
     if (
         millis() -
