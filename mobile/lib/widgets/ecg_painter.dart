@@ -4,58 +4,63 @@ class EcgPainter extends CustomPainter {
   final List<double> points;
   final bool showGrid;
 
-  EcgPainter(this.points, this.showGrid);
+  final Color lineColor;
+  final Color gridColor;
+  final Color baselineColor;
+
+  final int maxPoints;
+
+  EcgPainter(
+    this.points,
+    this.showGrid, {
+    required this.lineColor,
+    required this.gridColor,
+    required this.baselineColor,
+    this.maxPoints = 600,
+  });
 
   static const double displayRange = 8050.0;
-
-  static const int maxPoints = 300;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (showGrid) {
-      final gridPaint = Paint()
-        ..color = Colors.green.withValues(alpha: 0.15)
-        ..strokeWidth = 1.0;
-
-      const double gridSpacing = 20.0;
-
-      for (double x = 0; x < size.width; x += gridSpacing) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-      }
-
-      for (double y = 0; y < size.height; y += gridSpacing) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-      }
+      _drawGrid(canvas, size);
     }
+
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width, size.height / 2),
+      Paint()
+        ..color = baselineColor
+        ..strokeWidth = 1.0,
+    );
 
     if (points.length < 2) {
       return;
     }
 
-    final ecgPaint = Paint()
-      ..color = Colors.greenAccent
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..isAntiAlias = true;
+    final start = points.length > maxPoints ? points.length - maxPoints : 0;
+
+    final count = points.length - start;
+
+    final dx = size.width / (maxPoints - 1);
+
+    final centerY = size.height / 2;
+
+    final halfHeight = size.height * 0.44;
 
     final path = Path();
 
-    double centerY = size.height / 2;
+    for (int i = 0; i < count; i++) {
+      double value = points[start + i];
 
-    double halfHeight = size.height / 2;
+      value = value.clamp(-displayRange, displayRange);
 
-    double dx = size.width / (maxPoints - 1);
+      final normalized = value / displayRange;
 
-    for (int i = 0; i < points.length; i++) {
-      double value = points[i].clamp(-displayRange, displayRange).toDouble();
+      final x = i * dx;
 
-      double normalized = value / displayRange;
-
-      double x = i * dx;
-
-      double y = centerY - normalized * halfHeight;
+      final y = centerY - normalized * halfHeight;
 
       if (i == 0) {
         path.moveTo(x, y);
@@ -64,7 +69,47 @@ class EcgPainter extends CustomPainter {
       }
     }
 
+    final glowPaint = Paint()
+      ..color = lineColor.withValues(alpha: 0.12)
+      ..strokeWidth = 6.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    final ecgPaint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.8
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    canvas.drawPath(path, glowPaint);
+
     canvas.drawPath(path, ecgPaint);
+  }
+
+  void _drawGrid(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = gridColor.withValues(alpha: 0.35)
+      ..strokeWidth = 1.0;
+
+    const verticalDivisions = 10;
+
+    const horizontalDivisions = 6;
+
+    for (int i = 1; i < verticalDivisions; i++) {
+      final x = size.width * i / verticalDivisions;
+
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+
+    for (int i = 1; i < horizontalDivisions; i++) {
+      final y = size.height * i / horizontalDivisions;
+
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
   }
 
   @override
