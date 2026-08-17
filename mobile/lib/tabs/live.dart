@@ -20,7 +20,6 @@ class _LiveState extends State<Live> {
   @override
   Widget build(BuildContext context) {
     final bleProvider = Provider.of<BleProvider>(context);
-    final liveEcgProvider = Provider.of<LiveEcgProvider>(context);
     final languageProvider = Provider.of<LanguageProvider>(context);
 
     if (bleProvider.isConnected == false) {
@@ -28,13 +27,19 @@ class _LiveState extends State<Live> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.bluetooth_disabled, size: 64, color: Colors.grey),
+            Icon(
+              Icons.bluetooth_disabled_rounded,
+              size: 58,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             SizedBox(height: 16),
             Text(
               languageProvider.translate("no_device_connected"),
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
-            SizedBox(height: 60),
+            SizedBox(height: 28),
             ElevatedButton(
               onPressed: widget.onGoToSettings,
               child: Text(languageProvider.translate("settings_tab")),
@@ -43,31 +48,10 @@ class _LiveState extends State<Live> {
           ],
         ),
       );
-    } else {
-      return Column(
-        children: [
-          SizedBox(height: 20),
-          Container(
-            margin: EdgeInsets.symmetric(horizontal: 16),
-            height: 250,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.black,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.teal.shade700, width: 1.5),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: CustomPaint(
-                painter: EcgPainter(
-                  bleProvider.ecgPoints,
-                  liveEcgProvider.showGrid,
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
     }
+
+    final liveEcgProvider = Provider.of<LiveEcgProvider>(context);
+
+    return Padding(padding: EdgeInsetsGeometry.fromLTRB(16, 10, 16, 12));
   }
 }

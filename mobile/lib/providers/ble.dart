@@ -52,7 +52,7 @@ class BleProvider extends ChangeNotifier {
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _ecgCharacteristic;
 
-  bool _isConnected = false;
+  bool _isConnected = true;
   bool _isScanning = false;
 
   List<ScanResult> _scanResults = [];
