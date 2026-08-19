@@ -7,11 +7,11 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class _SensorSample {
+class SensorSample {
   final double ecg;
   final double respiration;
 
-  _SensorSample(this.ecg, this.respiration);
+  const SensorSample(this.ecg, this.respiration);
 }
 
 class _Biquad {
@@ -91,6 +91,12 @@ class BleProvider extends ChangeNotifier {
 
   List<int> get ecgRawData => _ecgRawData;
 
+  final StreamController<List<SensorSample>> _sampleBatchController =
+      StreamController<List<SensorSample>>.broadcast();
+
+  StreamController<List<SensorSample>> get sampleBatches =>
+      _sampleBatchController;
+
   final List<double> _ecgPoints = [];
 
   List<double> get ecgPoints => _ecgPoints;
@@ -99,7 +105,7 @@ class BleProvider extends ChangeNotifier {
 
   List<double> get respirationPoints => _respirationPoints;
 
-  final Queue<_SensorSample> _pendingSamples = Queue<_SensorSample>();
+  final Queue<SensorSample> _pendingSamples = Queue<SensorSample>();
 
   Ticker? _displayTicker;
 
@@ -497,6 +503,8 @@ class BleProvider extends ChangeNotifier {
 
       _ecgRawData = List<int>.from(data);
 
+      final List<SensorSample> batch = [];
+
       for (int offset = 0; offset + 8 < data.length; offset += 9) {
         final ecg = parseSample(
           data[offset + 3],
@@ -510,7 +518,15 @@ class BleProvider extends ChangeNotifier {
           data[offset + 8],
         );
 
-        _pendingSamples.add(_SensorSample(ecg, respiration));
+        final sample = SensorSample(ecg, respiration);
+
+        _pendingSamples.add(sample);
+
+        batch.add(sample);
+      }
+
+      if (batch.isNotEmpty) {
+        _sampleBatchController.add(batch);
       }
 
       if (_pendingSamples.length > maxPendingSamples) {
@@ -958,6 +974,8 @@ class BleProvider extends ChangeNotifier {
     _connectionSubscription?.cancel();
 
     _displayTicker?.dispose();
+
+    _sampleBatchController.close();
 
     super.dispose();
   }

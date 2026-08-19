@@ -52,107 +52,114 @@ class _LiveState extends State<Live> {
       );
     }
 
-    return Padding(
-      padding: EdgeInsetsGeometry.fromLTRB(16, 10, 16, 12),
-      child: Column(
-        children: [
-          SizedBox(
-            height: 92,
-            child: Consumer<BleProvider>(
-              builder: (context, ble, child) {
-                return Row(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: _Heart(
-                          bpm: ble.heartRate,
-                          beatSerial: ble.heartBeatSerial,
+    return SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      bottom: true,
+      minimum: EdgeInsets.only(bottom: 15),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 10, 16, 12),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 92,
+              child: Consumer<BleProvider>(
+                builder: (context, ble, child) {
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: _Heart(
+                            bpm: ble.heartRate,
+                            beatSerial: ble.heartBeatSerial,
+                          ),
                         ),
                       ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 52,
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                    ),
-                    Expanded(
-                      child: Center(
-                        child: Text("Placeholder"),
-                        // child: _Respiration(
-                        //   respiratoryRate: ble.respiratoryRate,
-                        //   respirationLevel: ble.respirationLevel,
-                        // ),
+                      Container(
+                        width: 1,
+                        height: 52,
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: _Respiration(
+                            respiratoryRate: ble.respiratoryRate,
+                            respirationLevel: ble.respirationLevel,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            Divider(
+              height: 1,
+              color: Theme.of(context).colorScheme.outlineVariant,
+              thickness: 1,
+            ),
+            SizedBox(height: 14),
+            Expanded(
+              flex: 11,
+              child: Consumer<BleProvider>(
+                builder: (context, ble, child) {
+                  return _Graph(
+                    time: "2.4 s",
+                    title: "ECG",
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: EcgPainter(
+                          ble.ecgPoints,
+                          liveEcgProvider.showGrid,
+                          maxPoints: BleProvider.ecgVisiblePoints,
+                          lineColor: Theme.of(context).colorScheme.primary,
+                          gridColor: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant,
+                          baselineColor: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+                        ),
+                        size: Size.infinite,
                       ),
                     ),
-                  ],
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
-          Divider(
-            height: 1,
-            color: Theme.of(context).colorScheme.outlineVariant,
-            thickness: 1,
-          ),
-          SizedBox(height: 14),
-          Expanded(
-            flex: 11,
-            child: Consumer<BleProvider>(
-              builder: (context, ble, child) {
-                return _Graph(
-                  time: "2.4 s",
-                  title: "ECG",
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: EcgPainter(
-                        ble.ecgPoints,
-                        liveEcgProvider.showGrid,
-                        maxPoints: BleProvider.ecgVisiblePoints,
-                        lineColor: Theme.of(context).colorScheme.primary,
-                        gridColor: Theme.of(context).colorScheme.outlineVariant,
-                        baselineColor: Theme.of(
-                          context,
-                        ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+            SizedBox(height: 14),
+            Expanded(
+              flex: 9,
+              child: Consumer<BleProvider>(
+                builder: (context, ble, child) {
+                  return _Graph(
+                    time: "12 s",
+                    title: "Respiration",
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: RespirationPainter(
+                          ble.respirationPoints,
+                          ble.respirationDisplayRange,
+                          liveEcgProvider.showGrid,
+                          lineColor: Theme.of(context).colorScheme.tertiary,
+                          gridColor: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant,
+                          baselineColor: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+                          maxPoints: BleProvider.respirationVisiblePoints,
+                        ),
+                        size: Size.infinite,
                       ),
-                      size: Size.infinite,
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
-          SizedBox(height: 14),
-          Expanded(
-            flex: 9,
-            child: Consumer<BleProvider>(
-              builder: (context, ble, child) {
-                return _Graph(
-                  time: "12 s",
-                  title: "Respiration",
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: RespirationPainter(
-                        ble.respirationPoints,
-                        ble.respirationDisplayRange,
-                        liveEcgProvider.showGrid,
-                        lineColor: Theme.of(context).colorScheme.tertiary,
-
-                        gridColor: Theme.of(context).colorScheme.outlineVariant,
-
-                        baselineColor: Theme.of(
-                          context,
-                        ).colorScheme.outlineVariant.withValues(alpha: 0.55),
-
-                        maxPoints: BleProvider.respirationVisiblePoints,
-                      ),
-                      size: Size.infinite,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -171,7 +178,7 @@ class _Graph extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: EdgeInsetsGeometry.symmetric(horizontal: 2),
+          padding: EdgeInsets.symmetric(horizontal: 2),
           child: Row(
             children: [
               Text(
@@ -205,7 +212,6 @@ class _Graph extends StatelessWidget {
             child: child,
           ),
         ),
-        SizedBox(height: 15),
       ],
     );
   }
@@ -218,10 +224,10 @@ class _Heart extends StatefulWidget {
   const _Heart({required this.bpm, required this.beatSerial});
 
   @override
-  State<_Heart> createState() => __HeartState();
+  State<_Heart> createState() => _HeartState();
 }
 
-class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
+class _HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _scale;
 
@@ -247,7 +253,6 @@ class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
           begin: 1.12,
           end: 1.0,
         ).chain(CurveTween(curve: Curves.easeInOut)),
-
         weight: 65,
       ),
     ]).animate(_controller);
@@ -293,10 +298,9 @@ class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
                   builder: (context, child) {
                     final double scale = _scale.value;
 
-                    final double animationAmount = ((scale - 1.0) / 0.12).clamp(
-                      0.0,
-                      1.0,
-                    );
+                    final double animationAmount = ((scale - 1.0) / 0.12)
+                        .clamp(0.0, 1.0)
+                        .toDouble();
 
                     return Transform.scale(
                       scale: scale,
@@ -328,7 +332,7 @@ class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
               ),
             ),
           ),
-          const SizedBox(width: 9),
+          SizedBox(width: 9),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -342,9 +346,9 @@ class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
                       style: Theme.of(context).textTheme.headlineMedium
                           ?.copyWith(fontWeight: FontWeight.w600, height: 1),
                     ),
-                    const SizedBox(width: 4),
+                    SizedBox(width: 4),
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
+                      padding: EdgeInsets.only(bottom: 3),
                       child: Text(
                         "BPM",
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -354,11 +358,126 @@ class __HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
                     ),
                   ],
                 ),
-                const SizedBox(height: 5),
+                SizedBox(height: 5),
                 Text(
                   "Heart rate",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Respiration extends StatelessWidget {
+  final double respiratoryRate;
+  final double respirationLevel;
+
+  const _Respiration({
+    required this.respirationLevel,
+    required this.respiratoryRate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    final String rrText = respiratoryRate > 0
+        ? respiratoryRate.round().toString()
+        : "--";
+
+    final double level = respirationLevel.clamp(0.0, 1.0).toDouble();
+
+    return SizedBox(
+      width: 141,
+      height: 58,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            height: 48,
+            child: Center(
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: level),
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                builder: (context, animatedLevel, child) {
+                  return SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: scheme.primary.withValues(alpha: 0.75),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        ClipOval(
+                          child: SizedBox(
+                            width: 38,
+                            height: 38,
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              child: FractionallySizedBox(
+                                widthFactor: 1,
+                                heightFactor: animatedLevel,
+                                child: ColoredBox(
+                                  color: scheme.primary.withValues(alpha: 0.32),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      rrText,
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w600, height: 1),
+                    ),
+                    SizedBox(width: 4),
+                    Padding(
+                      padding: EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        "brpm",
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 5),
+                Text(
+                  "Respiration",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
