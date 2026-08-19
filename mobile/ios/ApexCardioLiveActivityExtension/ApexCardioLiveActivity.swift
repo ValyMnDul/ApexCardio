@@ -80,8 +80,7 @@ struct ApexCardioLiveActivity: Widget {
 
                         Text(
                             timerInterval:
-                                context.attributes.startedAt...
-                                Date.distantFuture,
+                                context.attributes.startedAt...Date.distantFuture,
                             countsDown: false
                         )
                         .font(
@@ -266,8 +265,7 @@ private struct ApexCardioLockScreenView: View {
 
                 Text(
                     timerInterval:
-                        context.attributes.startedAt...
-                        Date.distantFuture,
+                        context.attributes.startedAt...Date.distantFuture,
                     countsDown: false
                 )
                 .font(
