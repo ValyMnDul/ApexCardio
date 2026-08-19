@@ -6,6 +6,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../services/recording_database.dart';
+import '../services/recording_export_service.dart';
+import '../services/recording_report_service.dart';
 
 class RecordingViewer extends StatefulWidget {
   final int recordingId;
@@ -25,6 +27,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
 
   bool _loadingRecording = true;
   bool _loadingWindow = false;
+  bool _workingAction = false;
   String? _error;
 
   int _timelineDurationUs = 0;
@@ -368,6 +371,79 @@ class _RecordingViewerState extends State<RecordingViewer> {
     _scheduleWindowLoad();
   }
 
+  Future<void> _runViewerAction(
+    Future<void> Function() action, {
+    required String successMessage,
+  }) async {
+    if (_workingAction) {
+      return;
+    }
+
+    setState(() {
+      _workingAction = true;
+    });
+
+    try {
+      await action();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(successMessage)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Action failed: $error')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _workingAction = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _exportApex() async {
+    await _runViewerAction(() async {
+      await RecordingExportService.instance.export(
+        recordingId: widget.recordingId,
+        format: RecordingExportFormat.apex,
+      );
+    }, successMessage: 'Apex recording export opened');
+  }
+
+  Future<void> _exportCsv() async {
+    await _runViewerAction(() async {
+      await RecordingExportService.instance.export(
+        recordingId: widget.recordingId,
+        format: RecordingExportFormat.csv,
+      );
+    }, successMessage: 'CSV export opened');
+  }
+
+  Future<void> _sharePdfReport() async {
+    await _runViewerAction(() async {
+      await RecordingReportService.instance.shareReport(
+        recordingId: widget.recordingId,
+      );
+    }, successMessage: 'PDF report ready');
+  }
+
+  Future<void> _printPdfReport() async {
+    await _runViewerAction(() async {
+      await RecordingReportService.instance.printReport(
+        recordingId: widget.recordingId,
+      );
+    }, successMessage: 'Print dialog opened');
+  }
+
   Future<void> _editDetails() async {
     final recording = _recording;
 
@@ -500,10 +576,86 @@ class _RecordingViewerState extends State<RecordingViewer> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          if (_workingAction)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 19,
+                  height: 19,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           IconButton(
-            onPressed: recording == null ? null : _editDetails,
+            onPressed: recording == null || _workingAction
+                ? null
+                : _editDetails,
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit',
+          ),
+          PopupMenuButton<_ViewerAction>(
+            enabled: recording != null && !_workingAction,
+            tooltip: 'Recording actions',
+            onSelected: (action) {
+              switch (action) {
+                case _ViewerAction.exportApex:
+                  _exportApex();
+                  break;
+                case _ViewerAction.exportCsv:
+                  _exportCsv();
+                  break;
+                case _ViewerAction.sharePdf:
+                  _sharePdfReport();
+                  break;
+                case _ViewerAction.printPdf:
+                  _printPdfReport();
+                  break;
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: _ViewerAction.sharePdf,
+                child: Row(
+                  children: [
+                    Icon(Icons.picture_as_pdf_outlined),
+                    SizedBox(width: 10),
+                    Text('Generate / Share PDF'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _ViewerAction.printPdf,
+                child: Row(
+                  children: [
+                    Icon(Icons.print_outlined),
+                    SizedBox(width: 10),
+                    Text('Print PDF report'),
+                  ],
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: _ViewerAction.exportApex,
+                child: Row(
+                  children: [
+                    Icon(Icons.archive_outlined),
+                    SizedBox(width: 10),
+                    Text('Export .apex'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _ViewerAction.exportCsv,
+                child: Row(
+                  children: [
+                    Icon(Icons.table_chart_outlined),
+                    SizedBox(width: 10),
+                    Text('Export CSV'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -797,6 +949,8 @@ class _GraphCard extends StatelessWidget {
     );
   }
 }
+
+enum _ViewerAction { exportApex, exportCsv, sharePdf, printPdf }
 
 enum _SignalChannel { ecg, respiration }
 
