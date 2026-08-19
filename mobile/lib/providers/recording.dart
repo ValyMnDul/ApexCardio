@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -18,7 +19,7 @@ enum RecordingSessionState {
   error,
 }
 
-enum RecordingGapReason { paused, bluetoothDisconnected }
+enum RecordingGapReason { paused, bluetoothDisconnected, processRestart }
 
 extension RecordingGapReasonValue on RecordingGapReason {
   String get databaseValue {
@@ -27,6 +28,8 @@ extension RecordingGapReasonValue on RecordingGapReason {
         return 'paused';
       case RecordingGapReason.bluetoothDisconnected:
         return 'bluetooth_disconnected';
+      case RecordingGapReason.processRestart:
+        return 'process_restart';
     }
   }
 }
@@ -61,6 +64,8 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   final List<Completer<void>> _writeDrainWaiters = <Completer<void>>[];
   final Stopwatch _timelineClock = Stopwatch();
   final List<SensorSample> _chunkBuffer = <SensorSample>[];
+
+  int _timelineBaseUs = 0;
 
   static const int targetChunkSamples = 250;
   static const int bytesPerSample = 8;
@@ -165,14 +170,236 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _initialize() async {
     try {
       await _database.initialize();
-      await _database.recoverInterruptedRecordings();
       await _backgroundService.initialize();
+
+      final restored = await _restoreActiveSession();
+
+      if (!restored) {
+        await _database.recoverInterruptedRecordings();
+      }
+
       _initialized = true;
       _notify();
     } catch (error) {
       _lastError = error.toString();
       _state = RecordingSessionState.error;
       _notify();
+    }
+  }
+
+  Future<bool> _restoreActiveSession() async {
+    final db = await _database.database;
+
+    final activeRows = await db.query(
+      'recordings',
+      where: "status IN ('recording', 'paused')",
+      orderBy: 'updated_at_ms DESC, id DESC',
+    );
+
+    if (activeRows.isEmpty) {
+      return false;
+    }
+
+    final row = activeRows.first;
+
+    if (activeRows.length > 1) {
+      await _markOlderActiveRowsInterrupted(
+        activeRows.skip(1).toList(growable: false),
+      );
+    }
+
+    final id = row['id'] as int;
+    final name = row['name'] as String? ?? 'ApexCardio Recording';
+    final notes = row['notes'] as String?;
+    final startedAtMs = row['started_at_ms'] as int;
+    final status = row['status'] as String? ?? 'recording';
+    final persistedTimelineUs = row['timeline_duration_us'] as int? ?? 0;
+    final recordedSampleCount = row['recorded_sample_count'] as int? ?? 0;
+    final lastCommittedElapsedUs =
+        row['last_committed_elapsed_us'] as int? ?? 0;
+    final lastHeartbeatAtMs =
+        row['last_heartbeat_at_ms'] as int? ?? startedAtMs;
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+    final missingWallTimeUs =
+        math.max(0, nowMs - lastHeartbeatAtMs) *
+        Duration.microsecondsPerMillisecond;
+
+    final recoveredTimelineUs = math.max(
+      math.max(persistedTimelineUs + missingWallTimeUs, persistedTimelineUs),
+      lastCommittedElapsedUs,
+    );
+
+    final maxChunkRows = await db.rawQuery(
+      '''
+      SELECT
+        COALESCE(MAX(chunk_index), -1) AS max_chunk_index
+      FROM signal_chunks
+      WHERE recording_id = ?
+      ''',
+      <Object?>[id],
+    );
+
+    final maxChunkIndex =
+        (maxChunkRows.first['max_chunk_index'] as num?)?.toInt() ?? -1;
+
+    final openGapRows = await db.query(
+      'recording_gaps',
+      where: '''
+        recording_id = ?
+        AND end_elapsed_us IS NULL
+      ''',
+      whereArgs: <Object?>[id],
+      orderBy: 'start_elapsed_us DESC, id DESC',
+    );
+
+    if (openGapRows.length > 1) {
+      for (final staleGap in openGapRows.skip(1)) {
+        await _database.closeGap(
+          gapId: staleGap['id'] as int,
+          recordingId: id,
+          endElapsedUs: recoveredTimelineUs,
+        );
+      }
+    }
+
+    _recordingId = id;
+    _recordingName = name;
+    _notes = notes;
+    _startedAt = DateTime.fromMillisecondsSinceEpoch(startedAtMs);
+
+    _chunkIndex = maxChunkIndex + 1;
+    _chunkStartElapsedUs = null;
+    _nextSampleElapsedUs = null;
+
+    _receivedSampleCount = recordedSampleCount;
+    _persistedSampleCount = recordedSampleCount;
+
+    _chunkBuffer.clear();
+    _writeQueue.clear();
+    _writerBlocked = false;
+    _lastError = null;
+
+    _timelineBaseUs = recoveredTimelineUs;
+
+    _timelineClock
+      ..reset()
+      ..start();
+
+    _activeGapId = null;
+    _activeGapReason = null;
+
+    if (openGapRows.isNotEmpty) {
+      final openGap = openGapRows.first;
+
+      _activeGapId = openGap['id'] as int;
+      _activeGapReason = _gapReasonFromDatabase(openGap['reason'] as String?);
+    }
+
+    if (status == 'paused') {
+      _state = RecordingSessionState.paused;
+
+      if (_activeGapReason != RecordingGapReason.paused) {
+        if (_activeGapId != null) {
+          await _closeActiveGap(recoveredTimelineUs);
+        }
+
+        await _openGap(
+          RecordingGapReason.paused,
+          math.max(persistedTimelineUs, lastCommittedElapsedUs),
+        );
+      }
+    } else {
+      _state = RecordingSessionState.recording;
+
+      if (_activeGapReason == RecordingGapReason.paused) {
+        await _closeActiveGap(recoveredTimelineUs);
+      }
+
+      if (_activeGapId == null &&
+          recoveredTimelineUs > lastCommittedElapsedUs) {
+        await _openGap(
+          RecordingGapReason.processRestart,
+          lastCommittedElapsedUs,
+        );
+      }
+
+      if (_bleConnected && _activeGapReason != RecordingGapReason.paused) {
+        await _closeActiveGap(recoveredTimelineUs);
+
+        _nextSampleElapsedUs = recoveredTimelineUs;
+      }
+    }
+
+    await _database.updateRecordingProgress(
+      recordingId: id,
+      timelineDurationUs: recoveredTimelineUs,
+    );
+
+    _startHeartbeat();
+
+    await _backgroundService.start(
+      recordingId: id,
+      recordingName: name,
+      startedAtMs: startedAtMs,
+      paused: _state == RecordingSessionState.paused,
+      connected: _bleConnected,
+    );
+
+    return true;
+  }
+
+  Future<void> _markOlderActiveRowsInterrupted(
+    List<Map<String, Object?>> rows,
+  ) async {
+    if (rows.isEmpty) {
+      return;
+    }
+
+    final db = await _database.database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    await db.transaction((txn) async {
+      for (final row in rows) {
+        final id = row['id'] as int;
+        final timelineUs = row['timeline_duration_us'] as int? ?? 0;
+        final heartbeatMs = row['last_heartbeat_at_ms'] as int? ?? now;
+
+        await txn.rawUpdate(
+          '''
+          UPDATE recording_gaps
+          SET end_elapsed_us = ?
+          WHERE recording_id = ?
+            AND end_elapsed_us IS NULL
+          ''',
+          <Object?>[timelineUs, id],
+        );
+
+        await txn.update(
+          'recordings',
+          <String, Object?>{
+            'ended_at_ms': heartbeatMs,
+            'status': 'interrupted',
+            'updated_at_ms': now,
+          },
+          where: 'id = ?',
+          whereArgs: <Object?>[id],
+        );
+      }
+    });
+  }
+
+  RecordingGapReason _gapReasonFromDatabase(String? value) {
+    switch (value) {
+      case 'paused':
+        return RecordingGapReason.paused;
+      case 'bluetooth_disconnected':
+        return RecordingGapReason.bluetoothDisconnected;
+      case 'process_restart':
+        return RecordingGapReason.processRestart;
+      default:
+        return RecordingGapReason.processRestart;
     }
   }
 
@@ -249,6 +476,8 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         _chunkBuffer.clear();
         _writeQueue.clear();
         _writerBlocked = false;
+
+        _timelineBaseUs = 0;
 
         _timelineClock
           ..reset()
@@ -332,7 +561,7 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
 
-      final position = _timelineClock.elapsedMicroseconds;
+      final position = _clockTimelinePositionUs();
 
       await _closeActiveGap(position);
 
@@ -442,7 +671,7 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    _nextSampleElapsedUs ??= _timelineClock.elapsedMicroseconds;
+    _nextSampleElapsedUs ??= _clockTimelinePositionUs();
 
     for (final sample in batch) {
       _chunkStartElapsedUs ??= _nextSampleElapsedUs;
@@ -686,11 +915,12 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    if (_activeGapReason != RecordingGapReason.bluetoothDisconnected) {
+    if (_activeGapReason != RecordingGapReason.bluetoothDisconnected &&
+        _activeGapReason != RecordingGapReason.processRestart) {
       return;
     }
 
-    final position = _timelineClock.elapsedMicroseconds;
+    final position = _clockTimelinePositionUs();
     await _closeActiveGap(position);
     _nextSampleElapsedUs = position;
     _notify();
@@ -731,15 +961,19 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     _activeGapReason = null;
   }
 
+  int _clockTimelinePositionUs() {
+    return _timelineBaseUs + _timelineClock.elapsedMicroseconds;
+  }
+
   int _safeTimelinePositionUs() {
-    final stopwatchPosition = _timelineClock.elapsedMicroseconds;
+    final clockPosition = _clockTimelinePositionUs();
     final samplePosition = _nextSampleElapsedUs;
 
-    if (samplePosition != null && samplePosition > stopwatchPosition) {
+    if (samplePosition != null && samplePosition > clockPosition) {
       return samplePosition;
     }
 
-    return stopwatchPosition;
+    return clockPosition;
   }
 
   void _startHeartbeat() {
@@ -813,7 +1047,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     _chunkBuffer.clear();
     _writeQueue.clear();
     _writerBlocked = false;
-    _timelineClock.reset();
+    _timelineBaseUs = 0;
+    _timelineClock
+      ..stop()
+      ..reset();
   }
 
   void _notify() {
