@@ -13,19 +13,28 @@ import 'providers/font.dart';
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
 import 'tabs/settings.dart';
+import 'providers/recording.dart';
 
-void main() => runApp(
-  MultiProvider(
-    providers: [
-      ChangeNotifierProvider(create: (_) => ThemeProvider()),
-      ChangeNotifierProvider(create: (_) => LanguageProvider()),
-      ChangeNotifierProvider(create: (_) => FontScaleProvider()),
-      ChangeNotifierProvider(create: (_) => BleProvider()),
-      ChangeNotifierProvider(create: (_) => LiveEcgProvider()),
-    ],
-    child: App(),
-  ),
-);
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ChangeNotifierProvider(create: (_) => FontScaleProvider()),
+        ChangeNotifierProvider(create: (_) => BleProvider()),
+        ChangeNotifierProvider(create: (_) => LiveEcgProvider()),
+        ChangeNotifierProvider(
+          lazy: false,
+          create: (context) => RecordingProvider(context.read<BleProvider>()),
+        ),
+      ],
+      child: const App(),
+    ),
+  );
+}
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -48,7 +57,7 @@ class App extends StatelessWidget {
           child: child!,
         );
       },
-      home: Home(),
+      home: const Home(),
     );
   }
 }
@@ -61,7 +70,7 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> with TickerProviderStateMixin {
-  late TabController _tabController;
+  late final TabController _tabController;
 
   @override
   void initState() {
@@ -87,10 +96,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.graphic_eq, color: Colors.teal[800], size: 30),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Text.rich(
               TextSpan(
-                style: TextStyle(fontFamily: 'Poppins', fontSize: 22),
+                style: const TextStyle(fontFamily: 'Poppins', fontSize: 22),
                 children: [
                   TextSpan(
                     text: 'APEX',
@@ -106,7 +115,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                     style: TextStyle(
                       fontWeight: FontWeight.w500,
                       color: Colors.teal[800],
-                    ), // Poppins-Medium
+                    ),
                   ),
                 ],
               ),
@@ -117,15 +126,15 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           controller: _tabController,
           tabs: [
             Tab(
-              icon: Icon(Icons.favorite),
+              icon: const Icon(Icons.favorite),
               text: languageProvider.translate("live_tab"),
             ),
             Tab(
-              icon: Icon(Icons.folder),
+              icon: const Icon(Icons.folder),
               text: languageProvider.translate("recordings_tab"),
             ),
             Tab(
-              icon: Icon(Icons.settings),
+              icon: const Icon(Icons.settings),
               text: languageProvider.translate("settings_tab"),
             ),
           ],
@@ -137,8 +146,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           Live(() {
             _tabController.animateTo(2);
           }),
-          Recordings(),
-          Settings(),
+          const Recordings(),
+          const Settings(),
         ],
       ),
     );
