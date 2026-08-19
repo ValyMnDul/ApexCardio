@@ -59,6 +59,18 @@ class BleProvider extends ChangeNotifier {
 
   StreamSubscription<List<int>>? _valueSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
+  StreamSubscription<dynamic>? _servicesResetSubscription;
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
+  StreamSubscription<bool>? _scanStateSubscription;
+  StreamSubscription<List<ScanResult>>? _scanResultsSubscription;
+
+  Timer? _reconnectRetryTimer;
+
+  bool _manualDisconnect = false;
+  Future<bool>? _activationFuture;
+  bool _autoReconnectArmed = false;
+  bool _restorationRunning = false;
+  bool _disposed = false;
 
   final String serviceUuid = "12345678-1234-1234-1234-123456789abc";
 
@@ -233,29 +245,35 @@ class BleProvider extends ChangeNotifier {
   int get heartBeatSerial => _heartBeatSerial;
 
   BleProvider() {
-    FlutterBluePlus.adapterState.listen((state) {
-      if (state != BluetoothAdapterState.on) {
-        _isScanning = false;
-
-        _isConnected = false;
-
-        _handleDisconnect();
+    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
+      if (state == BluetoothAdapterState.on) {
+        unawaited(_restoreOrReconnect());
+        return;
       }
-    });
 
-    FlutterBluePlus.isScanning.listen((scanning) {
-      _isScanning = scanning;
+      _isScanning = false;
+
+      if (_connectedDevice != null || _isConnected) {
+        _handleUnexpectedDisconnect(_connectedDevice, scheduleReconnect: false);
+      }
 
       notifyListeners();
     });
 
-    FlutterBluePlus.scanResults.listen((results) {
+    _scanStateSubscription = FlutterBluePlus.isScanning.listen((scanning) {
+      _isScanning = scanning;
+      notifyListeners();
+    });
+
+    _scanResultsSubscription = FlutterBluePlus.scanResults.listen((results) {
       _scanResults = results
           .where((r) => r.device.platformName.isNotEmpty)
           .toList();
 
       notifyListeners();
     });
+
+    unawaited(_restoreOrReconnect());
   }
 
   Future<void> startScan() async {
@@ -288,87 +306,194 @@ class BleProvider extends ChangeNotifier {
 
   Future<bool> connectToDevice(BluetoothDevice device) async {
     try {
+      _manualDisconnect = false;
+      _reconnectRetryTimer?.cancel();
+      _autoReconnectArmed = false;
+
       await stopScan();
 
-      await device.connect(autoConnect: false, license: License.nonprofit);
-
-      final services = await device.discoverServices();
-
-      _ecgCharacteristic = null;
-
-      for (final service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            serviceUuid.toLowerCase()) {
-          for (final characteristic in service.characteristics) {
-            if (characteristic.uuid.toString().toLowerCase() ==
-                characteristicUuid.toLowerCase()) {
-              _ecgCharacteristic = characteristic;
-            }
-          }
-        }
-      }
-
-      if (_ecgCharacteristic == null) {
-        await device.disconnect();
-
-        return false;
+      if (_connectedDevice != null && _connectedDevice != device) {
+        await _detachCurrentDevice(disconnectDevice: true);
       }
 
       _connectedDevice = device;
 
-      _isConnected = true;
+      await _bindDeviceListeners(device);
 
-      _connectionStateController.add(true);
-
-      if (_connectionSubscription != null) {
-        await _connectionSubscription!.cancel();
+      if (!device.isConnected) {
+        await device.connect(autoConnect: false, license: License.nonprofit);
       }
 
-      _connectionSubscription = device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected) {
-          _handleDisconnect();
-        }
-      });
+      final activated = await _activateDevice(device);
 
-      await startListeningValues();
+      if (!activated) {
+        await _detachCurrentDevice(disconnectDevice: true);
 
-      notifyListeners();
+        return false;
+      }
 
       return true;
-    } catch (e) {
-      _handleDisconnect();
+    } catch (_) {
+      _handleUnexpectedDisconnect(device, scheduleReconnect: false);
 
       return false;
     }
   }
 
   Future<void> disconnect() async {
-    if (_connectedDevice != null) {
-      await _connectedDevice!.disconnect();
-    }
+    _manualDisconnect = true;
+    _reconnectRetryTimer?.cancel();
+    _autoReconnectArmed = false;
 
-    _handleDisconnect();
+    await _detachCurrentDevice(disconnectDevice: true);
+
+    _manualDisconnect = false;
   }
 
-  void _handleDisconnect() {
+  Future<void> _bindDeviceListeners(BluetoothDevice device) async {
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+
+    await _servicesResetSubscription?.cancel();
+    _servicesResetSubscription = null;
+
+    _connectionSubscription = device.connectionState.listen((state) {
+      if (_connectedDevice != device) {
+        return;
+      }
+
+      if (state == BluetoothConnectionState.connected) {
+        _autoReconnectArmed = false;
+        _reconnectRetryTimer?.cancel();
+
+        unawaited(_activateDevice(device));
+      } else if (state == BluetoothConnectionState.disconnected) {
+        _handleUnexpectedDisconnect(
+          device,
+          scheduleReconnect: !_manualDisconnect,
+        );
+      }
+    });
+
+    _servicesResetSubscription = device.onServicesReset.listen((_) {
+      if (_connectedDevice != device || !device.isConnected) {
+        return;
+      }
+
+      unawaited(_activateDevice(device, forceRediscovery: true));
+    });
+  }
+
+  Future<bool> _activateDevice(
+    BluetoothDevice device, {
+    bool forceRediscovery = false,
+  }) async {
+    if (_disposed || _connectedDevice != device || !device.isConnected) {
+      return false;
+    }
+
+    final running = _activationFuture;
+
+    if (running != null) {
+      return running;
+    }
+
+    final future = _performDeviceActivation(
+      device,
+      forceRediscovery: forceRediscovery,
+    );
+
+    _activationFuture = future;
+
+    try {
+      return await future;
+    } finally {
+      if (identical(_activationFuture, future)) {
+        _activationFuture = null;
+      }
+    }
+  }
+
+  Future<bool> _performDeviceActivation(
+    BluetoothDevice device, {
+    required bool forceRediscovery,
+  }) async {
+    try {
+      final services = forceRediscovery || device.servicesList.isEmpty
+          ? await device.discoverServices()
+          : device.servicesList;
+
+      if (_disposed || _connectedDevice != device || !device.isConnected) {
+        return false;
+      }
+
+      BluetoothCharacteristic? characteristic;
+
+      for (final service in services) {
+        if (service.uuid.toString().toLowerCase() !=
+            serviceUuid.toLowerCase()) {
+          continue;
+        }
+
+        for (final candidate in service.characteristics) {
+          if (candidate.uuid.toString().toLowerCase() ==
+              characteristicUuid.toLowerCase()) {
+            characteristic = candidate;
+            break;
+          }
+        }
+
+        if (characteristic != null) {
+          break;
+        }
+      }
+
+      if (characteristic == null) {
+        return false;
+      }
+
+      final wasConnected = _isConnected;
+
+      _ecgCharacteristic = characteristic;
+      _isConnected = true;
+      _autoReconnectArmed = false;
+
+      await startListeningValues();
+
+      if (!wasConnected) {
+        _connectionStateController.add(true);
+      }
+
+      notifyListeners();
+
+      return true;
+    } catch (_) {
+      _handleUnexpectedDisconnect(
+        device,
+        scheduleReconnect: !_manualDisconnect,
+      );
+
+      return false;
+    }
+  }
+
+  void _handleUnexpectedDisconnect(
+    BluetoothDevice? device, {
+    required bool scheduleReconnect,
+  }) {
+    if (_disposed) {
+      return;
+    }
+
     final wasConnected = _isConnected;
 
     _valueSubscription?.cancel();
-
     _valueSubscription = null;
 
-    _connectionSubscription?.cancel();
-
-    _connectionSubscription = null;
-
     _displayTicker?.dispose();
-
     _displayTicker = null;
 
-    _connectedDevice = null;
-
     _ecgCharacteristic = null;
-
     _isConnected = false;
 
     if (wasConnected) {
@@ -376,7 +501,178 @@ class BleProvider extends ChangeNotifier {
     }
 
     _resetSignalState();
+    notifyListeners();
 
+    if (scheduleReconnect &&
+        !_manualDisconnect &&
+        device != null &&
+        _connectedDevice == device) {
+      _scheduleAutoReconnect(device);
+    }
+  }
+
+  void _scheduleAutoReconnect(BluetoothDevice device) {
+    if (_disposed ||
+        _manualDisconnect ||
+        _autoReconnectArmed ||
+        _connectedDevice != device) {
+      return;
+    }
+
+    _reconnectRetryTimer?.cancel();
+
+    _reconnectRetryTimer = Timer(const Duration(seconds: 2), () {
+      unawaited(_armAutoReconnect(device));
+    });
+  }
+
+  Future<void> _armAutoReconnect(BluetoothDevice device) async {
+    if (_disposed ||
+        _manualDisconnect ||
+        _autoReconnectArmed ||
+        _connectedDevice != device) {
+      return;
+    }
+
+    if (device.isConnected) {
+      await _activateDevice(device);
+      return;
+    }
+
+    _autoReconnectArmed = true;
+
+    try {
+      await device.connect(
+        autoConnect: true,
+        mtu: null,
+        license: License.nonprofit,
+      );
+    } catch (_) {
+      _autoReconnectArmed = false;
+
+      if (!_manualDisconnect && _connectedDevice == device) {
+        _scheduleAutoReconnect(device);
+      }
+    }
+  }
+
+  Future<void> _restoreOrReconnect() async {
+    if (_disposed || _manualDisconnect || _restorationRunning || _isConnected) {
+      return;
+    }
+
+    _restorationRunning = true;
+
+    try {
+      final existing = _connectedDevice;
+
+      if (existing != null) {
+        if (existing.isConnected) {
+          await _bindDeviceListeners(existing);
+          await _activateDevice(existing);
+        } else {
+          await _bindDeviceListeners(existing);
+          _scheduleAutoReconnect(existing);
+        }
+
+        if (_isConnected ||
+            _autoReconnectArmed ||
+            _reconnectRetryTimer?.isActive == true) {
+          return;
+        }
+      }
+
+      final connectedDevices = FlutterBluePlus.connectedDevices;
+
+      for (final device in connectedDevices) {
+        if (_disposed || _manualDisconnect || _isConnected) {
+          return;
+        }
+
+        _connectedDevice = device;
+        await _bindDeviceListeners(device);
+
+        final activated = await _activateDevice(device);
+
+        if (activated) {
+          return;
+        }
+
+        await _detachCurrentDevice(disconnectDevice: false);
+      }
+
+      if (!Platform.isIOS || _disposed || _manualDisconnect || _isConnected) {
+        return;
+      }
+
+      final systemDevices = await FlutterBluePlus.systemDevices(<Guid>[
+        Guid(serviceUuid),
+      ]);
+
+      for (final device in systemDevices) {
+        if (_disposed || _manualDisconnect || _isConnected) {
+          return;
+        }
+
+        _connectedDevice = device;
+        await _bindDeviceListeners(device);
+
+        try {
+          if (!device.isConnected) {
+            await device.connect(
+              autoConnect: false,
+              license: License.nonprofit,
+            );
+          }
+
+          final activated = await _activateDevice(device);
+
+          if (activated) {
+            return;
+          }
+        } catch (_) {}
+
+        await _detachCurrentDevice(disconnectDevice: false);
+      }
+    } finally {
+      _restorationRunning = false;
+    }
+  }
+
+  Future<void> _detachCurrentDevice({required bool disconnectDevice}) async {
+    final device = _connectedDevice;
+    final wasConnected = _isConnected;
+
+    _reconnectRetryTimer?.cancel();
+    _autoReconnectArmed = false;
+
+    await _valueSubscription?.cancel();
+    _valueSubscription = null;
+
+    await _servicesResetSubscription?.cancel();
+    _servicesResetSubscription = null;
+
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+
+    _displayTicker?.dispose();
+    _displayTicker = null;
+
+    _ecgCharacteristic = null;
+    _isConnected = false;
+    _connectedDevice = null;
+
+    if (disconnectDevice && device != null) {
+      try {
+        await device.disconnect();
+      } catch (_) {}
+    }
+
+    if (wasConnected) {
+      _connectionStateController.add(false);
+    }
+
+    _resetSignalState();
     notifyListeners();
   }
 
@@ -508,7 +804,7 @@ class BleProvider extends ChangeNotifier {
 
     _startDisplayTicker();
 
-    _valueSubscription = _ecgCharacteristic!.lastValueStream.listen((data) {
+    _valueSubscription = _ecgCharacteristic!.onValueReceived.listen((data) {
       if (data.isEmpty) {
         return;
       }
@@ -980,14 +1276,21 @@ class BleProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _valueSubscription?.cancel();
+    _disposed = true;
 
+    _reconnectRetryTimer?.cancel();
+
+    _adapterStateSubscription?.cancel();
+    _scanStateSubscription?.cancel();
+    _scanResultsSubscription?.cancel();
+
+    _valueSubscription?.cancel();
+    _servicesResetSubscription?.cancel();
     _connectionSubscription?.cancel();
 
     _displayTicker?.dispose();
 
     _sampleBatchController.close();
-
     _connectionStateController.close();
 
     super.dispose();
