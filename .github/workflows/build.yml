@@ -6,15 +6,20 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-      - run: |
+          channel: stable
+
+      - name: Build Android APK
+        run: |
           cd mobile
           flutter pub get
           flutter build apk --release
+
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
@@ -23,18 +28,45 @@ jobs:
 
   build-ios:
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-      - run: |
+          channel: stable
+
+      - name: Get Flutter packages
+        run: |
           cd mobile
           flutter pub get
+
+      - name: Install Xcode project tooling
+        run: gem install xcodeproj --no-document
+
+      - name: Configure ApexCardio Live Activity
+        run: |
+          cd mobile/ios
+          ruby setup_live_activity.rb
+
+      - name: Build iOS
+        run: |
+          cd mobile
           flutter build ios --release --no-codesign
+
+      - name: Verify Live Activity extension
+        run: |
+          test -d mobile/build/ios/iphoneos/Runner.app/PlugIns/ApexCardioLiveActivityExtension.appex
+          echo "Live Activity extension found inside Runner.app"
+
+      - name: Create IPA
+        run: |
+          cd mobile
+          rm -rf Payload ApexCardio.ipa
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          cp -R build/ios/iphoneos/Runner.app Payload/
           zip -r -9 ApexCardio.ipa Payload
+
       - name: Upload iOS IPA
         uses: actions/upload-artifact@v4
         with:
