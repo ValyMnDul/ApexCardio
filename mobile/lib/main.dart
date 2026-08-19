@@ -1,5 +1,7 @@
 import 'package:apexcardio/providers/ble.dart';
 import 'package:apexcardio/providers/live_ecg.dart';
+import 'package:apexcardio/providers/recording.dart';
+import 'package:apexcardio/services/recording_background_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -13,10 +15,10 @@ import 'providers/font.dart';
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
 import 'tabs/settings.dart';
-import 'providers/recording.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  RecordingBackgroundService.prepareCommunication();
 
   runApp(
     MultiProvider(
