@@ -77,6 +77,17 @@ final class ApexCardioLiveActivityBridge {
 
             Task { @MainActor in
                 do {
+                    guard #available(iOS 16.1, *) else {
+                        result(
+                            FlutterError(
+                                code: "NOT_SUPPORTED",
+                                message: "Live Activities require iOS 16.1 or later.",
+                                details: nil
+                            )
+                        )
+                        return
+                    }
+
                     let activityId = try await start(
                         recordingId: recordingId,
                         recordingName: recordingName,
@@ -122,6 +133,17 @@ final class ApexCardioLiveActivityBridge {
 
             Task { @MainActor in
                 do {
+                    guard #available(iOS 16.1, *) else {
+                        result(
+                            FlutterError(
+                                code: "NOT_SUPPORTED",
+                                message: "Live Activities require iOS 16.1 or later.",
+                                details: nil
+                            )
+                        )
+                        return
+                    }
+
                     let updated = try await update(
                         recordingId: recordingId,
                         isPaused: isPaused,
@@ -163,6 +185,17 @@ final class ApexCardioLiveActivityBridge {
 
             Task { @MainActor in
                 do {
+                    guard #available(iOS 16.1, *) else {
+                        result(
+                            FlutterError(
+                                code: "NOT_SUPPORTED",
+                                message: "Live Activities require iOS 16.1 or later.",
+                                details: nil
+                            )
+                        )
+                        return
+                    }
+
                     let ended = try await end(
                         recordingId: recordingId,
                         finalStatus: finalStatus
@@ -182,6 +215,17 @@ final class ApexCardioLiveActivityBridge {
         case "endAll":
             Task { @MainActor in
                 do {
+                    guard #available(iOS 16.1, *) else {
+                        result(
+                            FlutterError(
+                                code: "NOT_SUPPORTED",
+                                message: "Live Activities require iOS 16.1 or later.",
+                                details: nil
+                            )
+                        )
+                        return
+                    }
+
                     let count = try await endAll()
                     result(count)
                 } catch {
