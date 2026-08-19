@@ -8,7 +8,6 @@ deployment_target = '16.1'
 project = Xcodeproj::Project.open(project_path)
 
 runner_target = project.targets.find { |target| target.name == 'Runner' }
-
 raise 'Runner target not found.' if runner_target.nil?
 
 runner_group =
@@ -104,9 +103,10 @@ flutter_build_number =
   ENV['FLUTTER_BUILD_NUMBER'] ||
   '1'
 
-runner_configurations = runner_target.build_configurations.each_with_object({}) do |config, map|
-  map[config.name] = config
-end
+runner_configurations =
+  runner_target.build_configurations.each_with_object({}) do |config, map|
+    map[config.name] = config
+  end
 
 extension_target.build_configurations.each do |config|
   runner_config =
@@ -191,42 +191,68 @@ unless runner_target.dependency_for_target(extension_target)
   runner_target.add_dependency(extension_target)
 end
 
-embed_phase =
-  runner_target.copy_files_build_phases.find do |phase|
+copy_phases =
+  runner_target.copy_files_build_phases.select do |phase|
     [
       'Embed Foundation Extensions',
       'Embed App Extensions',
     ].include?(phase.name)
   end
 
+embed_phase = copy_phases.first
+
+copy_phases.drop(1).each do |duplicate_phase|
+  runner_target.build_phases.delete(duplicate_phase)
+  duplicate_phase.remove_from_project
+end
+
 if embed_phase.nil?
   embed_phase =
     runner_target.new_copy_files_build_phase(
-      'Embed Foundation Extensions'
+      'Embed App Extensions'
     )
-
-  embed_phase.symbol_dst_subfolder_spec =
-    :plug_ins
-  embed_phase.dst_path = ''
+else
+  embed_phase.name = 'Embed App Extensions'
 end
 
-already_embedded =
-  embed_phase.files.any? do |build_file|
-    build_file.file_ref == extension_target.product_reference
+embed_phase.symbol_dst_subfolder_spec = :plug_ins
+embed_phase.dst_path = ''
+
+embed_phase.files.dup.each do |build_file|
+  next unless build_file.file_ref == extension_target.product_reference
+
+  embed_phase.remove_build_file(build_file)
+end
+
+build_file =
+  embed_phase.add_file_reference(
+    extension_target.product_reference,
+    true
+  )
+
+build_file.settings = {
+  'ATTRIBUTES' => [
+    'RemoveHeadersOnCopy',
+  ],
+}
+
+thin_binary_phase =
+  runner_target.shell_script_build_phases.find do |phase|
+    phase.name == 'Thin Binary'
   end
 
-unless already_embedded
-  build_file =
-    embed_phase.add_file_reference(
-      extension_target.product_reference,
-      true
-    )
+if thin_binary_phase
+  phases = runner_target.build_phases
 
-  build_file.settings = {
-    'ATTRIBUTES' => [
-      'RemoveHeadersOnCopy',
-    ],
-  }
+  phases.delete(embed_phase)
+
+  thin_index = phases.index(thin_binary_phase)
+
+  if thin_index.nil?
+    phases << embed_phase
+  else
+    phases.insert(thin_index, embed_phase)
+  end
 end
 
 project.save
@@ -241,4 +267,4 @@ puts '  ApexCardioLiveActivityBridge.swift'
 puts 'Extension files:'
 puts '  ApexCardioLiveActivity.swift'
 puts '  ApexCardioRecordingActivityShared.swift'
-puts 'Live Activity extension embedded into Runner.'
+puts 'Embed App Extensions is placed before Thin Binary.'
