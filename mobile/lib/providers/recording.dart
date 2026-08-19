@@ -1,0 +1,777 @@
+import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+import '../services/recording_database.dart';
+import 'ble.dart';
+
+enum RecordingSessionState {
+  idle,
+  starting,
+  recording,
+  paused,
+  stopping,
+  error,
+}
+
+enum RecordingGapReason { paused, bluetoothDisconnected }
+
+extension RecordingGapReasonValue on RecordingGapReason {
+  String get databaseValue {
+    switch (this) {
+      case RecordingGapReason.paused:
+        return 'paused';
+      case RecordingGapReason.bluetoothDisconnected:
+        return 'bluetooth_disconnected';
+    }
+  }
+}
+
+class _PendingChunk {
+  final int recordingId;
+  final int chunkIndex;
+  final int startElapsedUs;
+  final int endElapsedUs;
+  final int sampleCount;
+  final Uint8List signalData;
+
+  const _PendingChunk({
+    required this.recordingId,
+    required this.chunkIndex,
+    required this.startElapsedUs,
+    required this.endElapsedUs,
+    required this.sampleCount,
+    required this.signalData,
+  });
+}
+
+class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
+  final BleProvider _ble;
+  final RecordingDatabase _database;
+
+  late final StreamSubscription<List<SensorSample>> _sampleSubscription;
+  late final StreamSubscription<bool> _connectionSubscription;
+
+  final Queue<_PendingChunk> _writeQueue = Queue<_PendingChunk>();
+  final List<Completer<void>> _writeDrainWaiters = <Completer<void>>[];
+  final Stopwatch _timelineClock = Stopwatch();
+  final List<SensorSample> _chunkBuffer = <SensorSample>[];
+
+  static const int targetChunkSamples = 250;
+  static const int bytesPerSample = 8;
+  static const int encodingVersion = 1;
+  static const Duration heartbeatInterval = Duration(seconds: 5);
+  static const int maxWriteAttempts = 3;
+
+  RecordingSessionState _state = RecordingSessionState.idle;
+  RecordingSessionState get state => _state;
+
+  bool _initialized = false;
+  bool get initialized => _initialized;
+
+  bool _disposed = false;
+  bool _bleConnected = false;
+  bool get bleConnected => _bleConnected;
+
+  bool _writerRunning = false;
+  bool _writerBlocked = false;
+  bool get hasPendingWrites => _writeQueue.isNotEmpty || _writerRunning;
+  int get pendingChunkWrites => _writeQueue.length;
+
+  int? _recordingId;
+  int? get recordingId => _recordingId;
+
+  String? _recordingName;
+  String? get recordingName => _recordingName;
+
+  String? _notes;
+  String? get notes => _notes;
+
+  DateTime? _startedAt;
+  DateTime? get startedAt => _startedAt;
+
+  int? _activeGapId;
+  RecordingGapReason? _activeGapReason;
+  RecordingGapReason? get activeGapReason => _activeGapReason;
+
+  int _chunkIndex = 0;
+  int? _chunkStartElapsedUs;
+  int? _nextSampleElapsedUs;
+
+  int _receivedSampleCount = 0;
+  int get receivedSampleCount => _receivedSampleCount;
+
+  int _persistedSampleCount = 0;
+  int get persistedSampleCount => _persistedSampleCount;
+
+  String? _lastError;
+  String? get lastError => _lastError;
+
+  Timer? _heartbeatTimer;
+  Future<void>? _initializationFuture;
+  Future<void> _controlChain = Future<void>.value();
+
+  RecordingProvider(this._ble, {RecordingDatabase? database})
+    : _database = database ?? RecordingDatabase.instance {
+    _bleConnected = _ble.isConnected;
+
+    _sampleSubscription = _ble.sampleBatches.listen(_onSampleBatch);
+    _connectionSubscription = _ble.connectionChanges.listen(
+      _onConnectionChanged,
+    );
+
+    WidgetsBinding.instance.addObserver(this);
+    _initializationFuture = _initialize();
+  }
+
+  bool get isIdle => _state == RecordingSessionState.idle;
+  bool get isStarting => _state == RecordingSessionState.starting;
+  bool get isRecording => _state == RecordingSessionState.recording;
+  bool get isPaused => _state == RecordingSessionState.paused;
+  bool get isStopping => _state == RecordingSessionState.stopping;
+  bool get hasError => _state == RecordingSessionState.error;
+  bool get hasActiveRecording =>
+      _state != RecordingSessionState.idle && _recordingId != null;
+
+  int get timelineElapsedUs {
+    if (_recordingId == null) {
+      return 0;
+    }
+
+    return _safeTimelinePositionUs();
+  }
+
+  Duration get timelineDuration => Duration(microseconds: timelineElapsedUs);
+
+  double get measuredDurationSeconds =>
+      _receivedSampleCount / BleProvider.sampleRate;
+
+  Future<void> _initialize() async {
+    try {
+      await _database.initialize();
+      await _database.recoverInterruptedRecordings();
+      _initialized = true;
+      _notify();
+    } catch (error) {
+      _lastError = error.toString();
+      _state = RecordingSessionState.error;
+      _notify();
+    }
+  }
+
+  Future<void> ensureInitialized() async {
+    final future = _initializationFuture;
+
+    if (future != null) {
+      await future;
+    }
+
+    if (!_initialized) {
+      throw StateError(
+        _lastError ?? 'Recording database initialization failed.',
+      );
+    }
+  }
+
+  Future<void> startRecording({
+    required String name,
+    String? notes,
+    Map<String, Object?>? additionalData,
+  }) {
+    return _serializeControl(() async {
+      await ensureInitialized();
+
+      if (_state != RecordingSessionState.idle) {
+        return;
+      }
+
+      _state = RecordingSessionState.starting;
+      _lastError = null;
+      _notify();
+
+      try {
+        final now = DateTime.now();
+        final cleanedName = name.trim().isEmpty
+            ? _defaultRecordingName(now)
+            : name.trim();
+        final cleanedNotes = notes?.trim();
+        final metadataJson = additionalData == null || additionalData.isEmpty
+            ? null
+            : jsonEncode(additionalData);
+
+        final id = await _database.createRecording(
+          name: cleanedName,
+          notes: cleanedNotes == null || cleanedNotes.isEmpty
+              ? null
+              : cleanedNotes,
+          metadataJson: metadataJson,
+          startedAtMs: now.millisecondsSinceEpoch,
+          sampleRate: BleProvider.sampleRate,
+          deviceName: _ble.deviceName,
+        );
+
+        _recordingId = id;
+        _recordingName = cleanedName;
+        _notes = cleanedNotes == null || cleanedNotes.isEmpty
+            ? null
+            : cleanedNotes;
+        _startedAt = now;
+        _chunkIndex = 0;
+        _chunkStartElapsedUs = null;
+        _nextSampleElapsedUs = null;
+        _activeGapId = null;
+        _activeGapReason = null;
+        _receivedSampleCount = 0;
+        _persistedSampleCount = 0;
+        _chunkBuffer.clear();
+        _writeQueue.clear();
+        _writerBlocked = false;
+
+        _timelineClock
+          ..reset()
+          ..start();
+
+        _state = RecordingSessionState.recording;
+        _startHeartbeat();
+
+        if (!_bleConnected) {
+          await _openGap(RecordingGapReason.bluetoothDisconnected, 0);
+        }
+
+        _notify();
+      } catch (error) {
+        _lastError = error.toString();
+        _state = RecordingSessionState.error;
+        _notify();
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> pauseRecording() {
+    return _serializeControl(() async {
+      if (_state != RecordingSessionState.recording) {
+        return;
+      }
+
+      _state = RecordingSessionState.paused;
+      _notify();
+
+      _flushChunk();
+      final position = _safeTimelinePositionUs();
+
+      await _waitForWrites();
+
+      if (_activeGapId != null) {
+        await _closeActiveGap(position);
+      }
+
+      await _database.setRecordingStatus(
+        recordingId: _recordingId!,
+        status: 'paused',
+      );
+
+      await _openGap(RecordingGapReason.paused, position);
+
+      _nextSampleElapsedUs = null;
+      _notify();
+    });
+  }
+
+  Future<void> resumeRecording() {
+    return _serializeControl(() async {
+      if (_state != RecordingSessionState.paused) {
+        return;
+      }
+
+      final position = _timelineClock.elapsedMicroseconds;
+
+      await _closeActiveGap(position);
+
+      await _database.setRecordingStatus(
+        recordingId: _recordingId!,
+        status: 'recording',
+      );
+
+      _state = RecordingSessionState.recording;
+      _nextSampleElapsedUs = position;
+
+      if (!_bleConnected) {
+        await _openGap(RecordingGapReason.bluetoothDisconnected, position);
+      }
+
+      _notify();
+    });
+  }
+
+  Future<void> stopRecording() {
+    return _serializeControl(() async {
+      if (_recordingId == null ||
+          _state == RecordingSessionState.idle ||
+          _state == RecordingSessionState.stopping) {
+        return;
+      }
+
+      final id = _recordingId!;
+      _state = RecordingSessionState.stopping;
+      _notify();
+
+      _flushChunk();
+      final finalPosition = _safeTimelinePositionUs();
+
+      try {
+        await _waitForWrites();
+        await _closeActiveGap(finalPosition);
+
+        _timelineClock.stop();
+        _stopHeartbeat();
+
+        await _database.finishRecording(
+          recordingId: id,
+          endedAtMs: DateTime.now().millisecondsSinceEpoch,
+          timelineDurationUs: finalPosition,
+        );
+
+        await _database.checkpoint();
+        _clearActiveSession();
+        _state = RecordingSessionState.idle;
+        _lastError = null;
+        _notify();
+      } catch (error) {
+        _lastError = error.toString();
+        _state = RecordingSessionState.error;
+        _notify();
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> retryPendingWrites() async {
+    if (!_writerBlocked || _writeQueue.isEmpty) {
+      return;
+    }
+
+    _lastError = null;
+    _writerBlocked = false;
+    _startWriter();
+    await _waitForWrites();
+    _notify();
+  }
+
+  void clearError() {
+    if (_state == RecordingSessionState.error && _recordingId == null) {
+      _state = RecordingSessionState.idle;
+    }
+
+    _lastError = null;
+    _notify();
+  }
+
+  void _onSampleBatch(List<SensorSample> batch) {
+    if (_state != RecordingSessionState.recording ||
+        !_bleConnected ||
+        _activeGapId != null ||
+        batch.isEmpty ||
+        _writerBlocked) {
+      return;
+    }
+
+    _nextSampleElapsedUs ??= _timelineClock.elapsedMicroseconds;
+
+    for (final sample in batch) {
+      _chunkStartElapsedUs ??= _nextSampleElapsedUs;
+      _chunkBuffer.add(sample);
+      _receivedSampleCount++;
+      _nextSampleElapsedUs = _nextSampleElapsedUs! + _samplePeriodUs;
+
+      if (_chunkBuffer.length >= targetChunkSamples) {
+        _flushChunk();
+      }
+    }
+  }
+
+  void _flushChunk() {
+    if (_chunkBuffer.isEmpty) {
+      return;
+    }
+
+    final recordingId = _recordingId;
+    final startElapsedUs = _chunkStartElapsedUs;
+
+    if (recordingId == null || startElapsedUs == null) {
+      return;
+    }
+
+    final samples = List<SensorSample>.from(_chunkBuffer);
+    final endElapsedUs = startElapsedUs + samples.length * _samplePeriodUs;
+    final encodedData = _encodeSamples(samples);
+
+    final chunk = _PendingChunk(
+      recordingId: recordingId,
+      chunkIndex: _chunkIndex,
+      startElapsedUs: startElapsedUs,
+      endElapsedUs: endElapsedUs,
+      sampleCount: samples.length,
+      signalData: encodedData,
+    );
+
+    _chunkBuffer.clear();
+    _chunkStartElapsedUs = null;
+    _chunkIndex++;
+
+    _writeQueue.add(chunk);
+    _startWriter();
+  }
+
+  void _startWriter() {
+    if (_writerRunning || _writerBlocked || _disposed) {
+      return;
+    }
+
+    _writerRunning = true;
+    unawaited(_processWriteQueue());
+  }
+
+  Future<void> _processWriteQueue() async {
+    try {
+      while (_writeQueue.isNotEmpty && !_writerBlocked && !_disposed) {
+        final chunk = _writeQueue.first;
+        Object? lastFailure;
+
+        for (int attempt = 1; attempt <= maxWriteAttempts; attempt++) {
+          try {
+            await _database.insertSignalChunk(
+              recordingId: chunk.recordingId,
+              chunkIndex: chunk.chunkIndex,
+              startElapsedUs: chunk.startElapsedUs,
+              endElapsedUs: chunk.endElapsedUs,
+              sampleCount: chunk.sampleCount,
+              signalData: chunk.signalData,
+              encodingVersion: encodingVersion,
+            );
+
+            lastFailure = null;
+            break;
+          } catch (error) {
+            lastFailure = error;
+
+            if (attempt < maxWriteAttempts) {
+              await Future<void>.delayed(Duration(milliseconds: 150 * attempt));
+            }
+          }
+        }
+
+        if (lastFailure != null) {
+          _lastError = lastFailure.toString();
+          _writerBlocked = true;
+          _failWriteDrainWaiters(
+            StateError(_lastError ?? 'Recording write failed.'),
+          );
+          _notify();
+          break;
+        }
+
+        _writeQueue.removeFirst();
+        _persistedSampleCount += chunk.sampleCount;
+      }
+    } finally {
+      _writerRunning = false;
+
+      if (_writeQueue.isEmpty) {
+        _completeWriteDrainWaiters();
+      } else if (!_writerBlocked && !_disposed) {
+        _startWriter();
+      }
+    }
+  }
+
+  Future<void> _waitForWrites() async {
+    if (_writeQueue.isEmpty && !_writerRunning) {
+      return;
+    }
+
+    if (_writerBlocked) {
+      throw StateError(_lastError ?? 'Recording write queue is blocked.');
+    }
+
+    final completer = Completer<void>();
+    _writeDrainWaiters.add(completer);
+    await completer.future;
+
+    if (_writerBlocked) {
+      throw StateError(_lastError ?? 'Recording write queue is blocked.');
+    }
+  }
+
+  void _completeWriteDrainWaiters() {
+    if (_writeDrainWaiters.isEmpty) {
+      return;
+    }
+
+    final waiters = List<Completer<void>>.from(_writeDrainWaiters);
+    _writeDrainWaiters.clear();
+
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) {
+        waiter.complete();
+      }
+    }
+  }
+
+  void _failWriteDrainWaiters(Object error) {
+    if (_writeDrainWaiters.isEmpty) {
+      return;
+    }
+
+    final waiters = List<Completer<void>>.from(_writeDrainWaiters);
+    _writeDrainWaiters.clear();
+
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) {
+        waiter.completeError(error);
+      }
+    }
+  }
+
+  Uint8List _encodeSamples(List<SensorSample> samples) {
+    final data = ByteData(samples.length * bytesPerSample);
+
+    for (int i = 0; i < samples.length; i++) {
+      final offset = i * bytesPerSample;
+      final sample = samples[i];
+
+      data.setInt32(offset, sample.ecg.round(), Endian.little);
+
+      data.setInt32(offset + 4, sample.respiration.round(), Endian.little);
+    }
+
+    return data.buffer.asUint8List();
+  }
+
+  int get _samplePeriodUs =>
+      (Duration.microsecondsPerSecond / BleProvider.sampleRate).round();
+
+  void _onConnectionChanged(bool connected) {
+    if (_bleConnected == connected) {
+      return;
+    }
+
+    _bleConnected = connected;
+    _notify();
+
+    if (_recordingId == null) {
+      return;
+    }
+
+    unawaited(
+      _serializeControl(() async {
+        if (!connected) {
+          await _handleBluetoothDisconnected();
+        } else {
+          await _handleBluetoothReconnected();
+        }
+      }).catchError((Object error, StackTrace stackTrace) {
+        _lastError = error.toString();
+        _notify();
+      }),
+    );
+  }
+
+  Future<void> _handleBluetoothDisconnected() async {
+    if (_state != RecordingSessionState.recording) {
+      return;
+    }
+
+    _flushChunk();
+    final position = _safeTimelinePositionUs();
+    await _waitForWrites();
+
+    if (_activeGapId == null) {
+      await _openGap(RecordingGapReason.bluetoothDisconnected, position);
+    }
+
+    _nextSampleElapsedUs = null;
+    _notify();
+  }
+
+  Future<void> _handleBluetoothReconnected() async {
+    if (_state != RecordingSessionState.recording) {
+      return;
+    }
+
+    if (_activeGapReason != RecordingGapReason.bluetoothDisconnected) {
+      return;
+    }
+
+    final position = _timelineClock.elapsedMicroseconds;
+    await _closeActiveGap(position);
+    _nextSampleElapsedUs = position;
+    _notify();
+  }
+
+  Future<void> _openGap(RecordingGapReason reason, int startElapsedUs) async {
+    final recordingId = _recordingId;
+
+    if (recordingId == null || _activeGapId != null) {
+      return;
+    }
+
+    final gapId = await _database.openGap(
+      recordingId: recordingId,
+      startElapsedUs: startElapsedUs,
+      reason: reason.databaseValue,
+    );
+
+    _activeGapId = gapId;
+    _activeGapReason = reason;
+  }
+
+  Future<void> _closeActiveGap(int endElapsedUs) async {
+    final gapId = _activeGapId;
+    final recordingId = _recordingId;
+
+    if (gapId == null || recordingId == null) {
+      return;
+    }
+
+    await _database.closeGap(
+      gapId: gapId,
+      recordingId: recordingId,
+      endElapsedUs: endElapsedUs,
+    );
+
+    _activeGapId = null;
+    _activeGapReason = null;
+  }
+
+  int _safeTimelinePositionUs() {
+    final stopwatchPosition = _timelineClock.elapsedMicroseconds;
+    final samplePosition = _nextSampleElapsedUs;
+
+    if (samplePosition != null && samplePosition > stopwatchPosition) {
+      return samplePosition;
+    }
+
+    return stopwatchPosition;
+  }
+
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+
+    _heartbeatTimer = Timer.periodic(heartbeatInterval, (_) {
+      unawaited(_persistHeartbeat());
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  Future<void> _persistHeartbeat() async {
+    final id = _recordingId;
+
+    if (id == null || _state == RecordingSessionState.idle) {
+      return;
+    }
+
+    try {
+      await _database.updateRecordingProgress(
+        recordingId: id,
+        timelineDurationUs: _safeTimelinePositionUs(),
+      );
+    } catch (error) {
+      _lastError = error.toString();
+      _notify();
+    }
+  }
+
+  Future<void> _serializeControl(Future<void> Function() operation) {
+    final completer = Completer<void>();
+
+    _controlChain = _controlChain.then((_) async {
+      try {
+        await operation();
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      } catch (error, stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      }
+    });
+
+    return completer.future;
+  }
+
+  String _defaultRecordingName(DateTime dateTime) {
+    String two(int value) => value.toString().padLeft(2, '0');
+
+    return 'Recording ${dateTime.year}-${two(dateTime.month)}-${two(dateTime.day)} ${two(dateTime.hour)}:${two(dateTime.minute)}:${two(dateTime.second)}';
+  }
+
+  void _clearActiveSession() {
+    _recordingId = null;
+    _recordingName = null;
+    _notes = null;
+    _startedAt = null;
+    _activeGapId = null;
+    _activeGapReason = null;
+    _chunkIndex = 0;
+    _chunkStartElapsedUs = null;
+    _nextSampleElapsedUs = null;
+    _receivedSampleCount = 0;
+    _persistedSampleCount = 0;
+    _chunkBuffer.clear();
+    _writeQueue.clear();
+    _writerBlocked = false;
+    _timelineClock.reset();
+  }
+
+  void _notify() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> _persistLifecycleSnapshot() async {
+    if (_recordingId == null) {
+      return;
+    }
+
+    _flushChunk();
+
+    try {
+      await _waitForWrites();
+      await _persistHeartbeat();
+      await _database.checkpoint();
+    } catch (error) {
+      _lastError = error.toString();
+      _notify();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      unawaited(_persistLifecycleSnapshot());
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _stopHeartbeat();
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_sampleSubscription.cancel());
+    unawaited(_connectionSubscription.cancel());
+    super.dispose();
+  }
+}

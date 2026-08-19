@@ -52,7 +52,7 @@ class BleProvider extends ChangeNotifier {
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _ecgCharacteristic;
 
-  bool _isConnected = true;
+  bool _isConnected = false;
   bool _isScanning = false;
 
   List<ScanResult> _scanResults = [];
@@ -91,12 +91,6 @@ class BleProvider extends ChangeNotifier {
 
   List<int> get ecgRawData => _ecgRawData;
 
-  final StreamController<List<SensorSample>> _sampleBatchController =
-      StreamController<List<SensorSample>>.broadcast();
-
-  StreamController<List<SensorSample>> get sampleBatches =>
-      _sampleBatchController;
-
   final List<double> _ecgPoints = [];
 
   List<double> get ecgPoints => _ecgPoints;
@@ -104,6 +98,16 @@ class BleProvider extends ChangeNotifier {
   final List<double> _respirationPoints = [];
 
   List<double> get respirationPoints => _respirationPoints;
+
+  final StreamController<List<SensorSample>> _sampleBatchController =
+      StreamController<List<SensorSample>>.broadcast();
+
+  Stream<List<SensorSample>> get sampleBatches => _sampleBatchController.stream;
+
+  final StreamController<bool> _connectionStateController =
+      StreamController<bool>.broadcast();
+
+  Stream<bool> get connectionChanges => _connectionStateController.stream;
 
   final Queue<SensorSample> _pendingSamples = Queue<SensorSample>();
 
@@ -314,6 +318,8 @@ class BleProvider extends ChangeNotifier {
 
       _isConnected = true;
 
+      _connectionStateController.add(true);
+
       if (_connectionSubscription != null) {
         await _connectionSubscription!.cancel();
       }
@@ -345,6 +351,8 @@ class BleProvider extends ChangeNotifier {
   }
 
   void _handleDisconnect() {
+    final wasConnected = _isConnected;
+
     _valueSubscription?.cancel();
 
     _valueSubscription = null;
@@ -362,6 +370,10 @@ class BleProvider extends ChangeNotifier {
     _ecgCharacteristic = null;
 
     _isConnected = false;
+
+    if (wasConnected) {
+      _connectionStateController.add(false);
+    }
 
     _resetSignalState();
 
@@ -521,7 +533,6 @@ class BleProvider extends ChangeNotifier {
         final sample = SensorSample(ecg, respiration);
 
         _pendingSamples.add(sample);
-
         batch.add(sample);
       }
 
@@ -976,6 +987,8 @@ class BleProvider extends ChangeNotifier {
     _displayTicker?.dispose();
 
     _sampleBatchController.close();
+
+    _connectionStateController.close();
 
     super.dispose();
   }
