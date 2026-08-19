@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../services/recording_database.dart';
+import '../services/recording_background_service.dart';
 import 'ble.dart';
 
 enum RecordingSessionState {
@@ -51,6 +52,7 @@ class _PendingChunk {
 class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   final BleProvider _ble;
   final RecordingDatabase _database;
+  final RecordingBackgroundService _backgroundService;
 
   late final StreamSubscription<List<SensorSample>> _sampleSubscription;
   late final StreamSubscription<bool> _connectionSubscription;
@@ -114,13 +116,24 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void>? _initializationFuture;
   Future<void> _controlChain = Future<void>.value();
 
-  RecordingProvider(this._ble, {RecordingDatabase? database})
-    : _database = database ?? RecordingDatabase.instance {
+  RecordingProvider(
+    this._ble, {
+    RecordingDatabase? database,
+    RecordingBackgroundService? backgroundService,
+  }) : _database = database ?? RecordingDatabase.instance,
+       _backgroundService =
+           backgroundService ?? RecordingBackgroundService.instance {
     _bleConnected = _ble.isConnected;
 
     _sampleSubscription = _ble.sampleBatches.listen(_onSampleBatch);
     _connectionSubscription = _ble.connectionChanges.listen(
       _onConnectionChanged,
+    );
+
+    _backgroundService.bindCommands(
+      onPause: pauseRecording,
+      onResume: resumeRecording,
+      onStop: stopRecording,
     );
 
     WidgetsBinding.instance.addObserver(this);
@@ -153,6 +166,7 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       await _database.initialize();
       await _database.recoverInterruptedRecordings();
+      await _backgroundService.initialize();
       _initialized = true;
       _notify();
     } catch (error) {
@@ -192,7 +206,11 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       _lastError = null;
       _notify();
 
+      int? createdRecordingId;
+
       try {
+        await _backgroundService.requestNotificationPermission();
+
         final now = DateTime.now();
         final cleanedName = name.trim().isEmpty
             ? _defaultRecordingName(now)
@@ -212,6 +230,8 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
           sampleRate: BleProvider.sampleRate,
           deviceName: _ble.deviceName,
         );
+
+        createdRecordingId = id;
 
         _recordingId = id;
         _recordingName = cleanedName;
@@ -241,8 +261,30 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _openGap(RecordingGapReason.bluetoothDisconnected, 0);
         }
 
+        await _backgroundService.start(
+          recordingId: id,
+          recordingName: cleanedName,
+          startedAtMs: now.millisecondsSinceEpoch,
+          paused: false,
+          connected: _bleConnected,
+        );
+
         _notify();
       } catch (error) {
+        _stopHeartbeat();
+        _timelineClock.stop();
+
+        if (createdRecordingId != null) {
+          try {
+            await _database.deleteRecording(createdRecordingId);
+          } catch (_) {}
+        }
+
+        try {
+          await _backgroundService.stop();
+        } catch (_) {}
+
+        _clearActiveSession();
         _lastError = error.toString();
         _state = RecordingSessionState.error;
         _notify();
@@ -277,6 +319,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _openGap(RecordingGapReason.paused, position);
 
       _nextSampleElapsedUs = null;
+
+      await _syncBackgroundServiceState();
+
       _notify();
     });
   }
@@ -303,6 +348,8 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         await _openGap(RecordingGapReason.bluetoothDisconnected, position);
       }
 
+      await _syncBackgroundServiceState();
+
       _notify();
     });
   }
@@ -316,8 +363,14 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       final id = _recordingId!;
+      final name = _recordingName ?? 'ApexCardio Recording';
+
       _state = RecordingSessionState.stopping;
       _notify();
+
+      try {
+        await _backgroundService.showStopping(recordingName: name);
+      } catch (_) {}
 
       _flushChunk();
       final finalPosition = _safeTimelinePositionUs();
@@ -336,6 +389,11 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
 
         await _database.checkpoint();
+
+        try {
+          await _backgroundService.stop();
+        } catch (_) {}
+
         _clearActiveSession();
         _state = RecordingSessionState.idle;
         _lastError = null;
@@ -343,6 +401,11 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       } catch (error) {
         _lastError = error.toString();
         _state = RecordingSessionState.error;
+
+        try {
+          await _syncBackgroundServiceState();
+        } catch (_) {}
+
         _notify();
         rethrow;
       }
@@ -554,6 +617,23 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   int get _samplePeriodUs =>
       (Duration.microsecondsPerSecond / BleProvider.sampleRate).round();
 
+  Future<void> _syncBackgroundServiceState() async {
+    final id = _recordingId;
+    final name = _recordingName;
+    final startedAt = _startedAt;
+
+    if (id == null || name == null || startedAt == null) {
+      return;
+    }
+
+    await _backgroundService.update(
+      recordingName: name,
+      startedAtMs: startedAt.millisecondsSinceEpoch,
+      paused: _state == RecordingSessionState.paused,
+      connected: _bleConnected,
+    );
+  }
+
   void _onConnectionChanged(bool connected) {
     if (_bleConnected == connected) {
       return;
@@ -573,6 +653,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         } else {
           await _handleBluetoothReconnected();
         }
+
+        try {
+          await _syncBackgroundServiceState();
+        } catch (_) {}
       }).catchError((Object error, StackTrace stackTrace) {
         _lastError = error.toString();
         _notify();
@@ -769,6 +853,7 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _disposed = true;
     _stopHeartbeat();
+    _backgroundService.unbindCommands();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_sampleSubscription.cancel());
     unawaited(_connectionSubscription.cancel());
