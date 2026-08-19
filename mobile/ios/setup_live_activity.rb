@@ -34,9 +34,22 @@ def find_or_create_file(group, file_name)
   existing || group.new_file(file_name)
 end
 
+def add_file_once(target, file_ref)
+  exists = target.source_build_phase.files.any? do |build_file|
+    build_file.file_ref == file_ref
+  end
+
+  target.add_file_references([file_ref]) unless exists
+end
+
 shared_file = find_or_create_file(
   runner_group,
   'ApexCardioRecordingActivityShared.swift'
+)
+
+bridge_file = find_or_create_file(
+  runner_group,
+  'ApexCardioLiveActivityBridge.swift'
 )
 
 live_activity_file = find_or_create_file(
@@ -146,15 +159,24 @@ extension_target.build_configurations.each do |config|
   end
 end
 
-runner_target.add_file_references(
-  [shared_file]
+add_file_once(
+  runner_target,
+  shared_file
 )
 
-extension_target.add_file_references(
-  [
-    live_activity_file,
-    shared_file,
-  ]
+add_file_once(
+  runner_target,
+  bridge_file
+)
+
+add_file_once(
+  extension_target,
+  live_activity_file
+)
+
+add_file_once(
+  extension_target,
+  shared_file
 )
 
 %w[
@@ -213,5 +235,10 @@ puts
 puts 'ApexCardio Live Activity target configured.'
 puts "Target: #{extension_target.name}"
 puts "Deployment target: iOS #{deployment_target}"
-puts 'Shared Swift file added to Runner and extension.'
+puts 'Runner files:'
+puts '  ApexCardioRecordingActivityShared.swift'
+puts '  ApexCardioLiveActivityBridge.swift'
+puts 'Extension files:'
+puts '  ApexCardioLiveActivity.swift'
+puts '  ApexCardioRecordingActivityShared.swift'
 puts 'Live Activity extension embedded into Runner.'
