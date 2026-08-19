@@ -3,6 +3,7 @@ import 'package:apexcardio/providers/live_ecg.dart';
 import 'package:apexcardio/providers/recording.dart';
 import 'package:apexcardio/services/recording_background_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
 
 import 'themes/light.dart';
@@ -16,8 +17,11 @@ import 'tabs/live.dart';
 import 'tabs/recordings.dart';
 import 'tabs/settings.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await FlutterBluePlus.setOptions(restoreState: true);
+
   RecordingBackgroundService.prepareCommunication();
 
   runApp(
