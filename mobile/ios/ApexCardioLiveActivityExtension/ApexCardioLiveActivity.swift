@@ -18,7 +18,11 @@ struct ApexCardioLiveActivity: Widget {
                 context: context
             )
             .activityBackgroundTint(
-                Color.black.opacity(0.92)
+                Color(
+                    red: 0.035,
+                    green: 0.055,
+                    blue: 0.065
+                )
             )
             .activitySystemActionForegroundColor(
                 .white
@@ -27,39 +31,48 @@ struct ApexCardioLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(
-                        spacing: 7
+                        spacing: 6
                     ) {
-                        Image(
-                            systemName: "waveform.path.ecg"
+                        ApexCardioRecordingDot(
+                            state: context.state,
+                            size: 9
+                        )
+
+                        Text(
+                            context.state.isPaused
+                                ? "PAUSED"
+                                : context.state.isConnected
+                                    ? "REC"
+                                    : "GAP"
                         )
                         .font(
                             .system(
-                                size: 16,
-                                weight: .semibold
+                                size: 12,
+                                weight: .bold,
+                                design: .rounded
                             )
                         )
                         .foregroundStyle(
-                            .mint
+                            .white
                         )
-
-                        Text("APEX")
-                            .font(
-                                .system(
-                                    size: 13,
-                                    weight: .semibold,
-                                    design: .rounded
-                                )
-                            )
-                            .foregroundStyle(
-                                .primary
-                            )
                     }
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    ApexCardioConnectionIndicator(
-                        connected:
-                            context.state.isConnected
+                    Text(
+                        context.attributes.startedAt,
+                        style: .timer
+                    )
+                    .font(
+                        .system(
+                            size: 12,
+                            weight: .semibold,
+                            design: .monospaced
+                        )
+                    )
+                    .monospacedDigit()
+                    .foregroundStyle(
+                        .white
                     )
                 }
 
@@ -67,6 +80,19 @@ struct ApexCardioLiveActivity: Widget {
                     VStack(
                         spacing: 3
                     ) {
+                        Text("APEX CARDIO")
+                            .font(
+                                .system(
+                                    size: 10,
+                                    weight: .semibold,
+                                    design: .rounded
+                                )
+                            )
+                            .tracking(0.8)
+                            .foregroundStyle(
+                                Color.mint
+                            )
+
                         Text(
                             context.attributes.recordingName
                         )
@@ -77,59 +103,128 @@ struct ApexCardioLiveActivity: Widget {
                             )
                         )
                         .lineLimit(1)
-
-                        Text(
-                            timerInterval:
-                                context.attributes.startedAt...Date.distantFuture,
-                            countsDown: false
+                        .foregroundStyle(
+                            .white
                         )
-                        .font(
-                            .system(
-                                size: 22,
-                                weight: .medium,
-                                design: .monospaced
-                            )
-                        )
-                        .monospacedDigit()
                     }
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    ApexCardioActivityControls(
-                        isPaused:
-                            context.state.isPaused,
-                        compact: true
-                    )
+                    VStack(
+                        spacing: 8
+                    ) {
+                        HStack {
+                            Text(
+                                context.state.statusText
+                            )
+                            .font(
+                                .system(
+                                    size: 12,
+                                    weight: .medium
+                                )
+                            )
+                            .foregroundStyle(
+                                .white.opacity(0.82)
+                            )
+
+                            Spacer()
+
+                            Text(
+                                context.state.isConnected
+                                    ? "ECG + RESP"
+                                    : "Waiting for signal"
+                            )
+                            .font(
+                                .system(
+                                    size: 11,
+                                    weight: .medium
+                                )
+                            )
+                            .foregroundStyle(
+                                context.state.isConnected
+                                    ? Color.mint
+                                    : Color.orange
+                            )
+                        }
+
+                        ApexCardioActivityControls(
+                            isPaused:
+                                context.state.isPaused,
+                            compact: true
+                        )
+                    }
                     .padding(
                         .top,
-                        4
+                        3
                     )
                 }
             } compactLeading: {
-                Image(
-                    systemName: "waveform.path.ecg"
-                )
-                .foregroundStyle(
-                    .mint
-                )
-            } compactTrailing: {
-                ApexCardioCompactStatus(
-                    state: context.state
-                )
-            } minimal: {
-                Circle()
-                    .fill(
-                        ApexCardioStatusStyle.color(
-                            for: context.state
+                HStack(
+                    spacing: 4
+                ) {
+                    ApexCardioRecordingDot(
+                        state: context.state,
+                        size: 8
+                    )
+
+                    Text(
+                        context.state.isPaused
+                            ? "PAUSE"
+                            : context.state.isConnected
+                                ? "REC"
+                                : "GAP"
+                    )
+                    .font(
+                        .system(
+                            size: 10,
+                            weight: .bold,
+                            design: .rounded
                         )
                     )
-                    .frame(
-                        width: 10,
-                        height: 10
+                    .foregroundStyle(
+                        .white
                     )
+                }
+            } compactTrailing: {
+                Image(
+                    systemName:
+                        context.state.isConnected
+                            ? "waveform.path.ecg"
+                            : "exclamationmark"
+                )
+                .font(
+                    .system(
+                        size: 12,
+                        weight: .bold
+                    )
+                )
+                .foregroundStyle(
+                    context.state.isConnected
+                        ? Color.mint
+                        : Color.orange
+                )
+            } minimal: {
+                ZStack {
+                    Circle()
+                        .stroke(
+                            Color.white.opacity(0.22),
+                            lineWidth: 1
+                        )
+
+                    ApexCardioRecordingDot(
+                        state: context.state,
+                        size: 8
+                    )
+                }
+                .frame(
+                    width: 16,
+                    height: 16
+                )
             }
             .keylineTint(
-                .mint
+                ApexCardioStatusStyle.color(
+                    for: context.state
+                )
             )
         }
     }
@@ -141,75 +236,52 @@ private struct ApexCardioLockScreenView: View {
 
     var body: some View {
         VStack(
-            spacing: 14
+            spacing: 13
         ) {
             HStack(
                 alignment: .center,
-                spacing: 12
+                spacing: 10
             ) {
-                ZStack {
-                    RoundedRectangle(
-                        cornerRadius: 13,
-                        style: .continuous
-                    )
-                    .fill(
-                        Color.mint.opacity(0.14)
-                    )
-
-                    Image(
-                        systemName: "waveform.path.ecg"
-                    )
-                    .font(
-                        .system(
-                            size: 23,
-                            weight: .semibold
-                        )
-                    )
-                    .foregroundStyle(
-                        .mint
-                    )
-                }
-                .frame(
-                    width: 48,
-                    height: 48
-                )
-
-                VStack(
-                    alignment: .leading,
-                    spacing: 3
+                HStack(
+                    spacing: 7
                 ) {
+                    ApexCardioRecordingDot(
+                        state: context.state,
+                        size: 10
+                    )
+
                     Text("APEX CARDIO")
                         .font(
                             .system(
-                                size: 11,
-                                weight: .semibold,
+                                size: 12,
+                                weight: .bold,
                                 design: .rounded
                             )
                         )
+                        .tracking(0.8)
                         .foregroundStyle(
-                            .secondary
+                            .white
                         )
-                        .tracking(1.1)
-
-                    Text(
-                        context.attributes.recordingName
-                    )
-                    .font(
-                        .system(
-                            size: 17,
-                            weight: .semibold
-                        )
-                    )
-                    .lineLimit(1)
                 }
 
-                Spacer(
-                    minLength: 8
-                )
+                Spacer()
 
-                ApexCardioConnectionIndicator(
-                    connected:
-                        context.state.isConnected
+                Text(
+                    context.state.isConnected
+                        ? "CONNECTED"
+                        : "SIGNAL GAP"
+                )
+                .font(
+                    .system(
+                        size: 10,
+                        weight: .semibold,
+                        design: .rounded
+                    )
+                )
+                .foregroundStyle(
+                    context.state.isConnected
+                        ? Color.mint
+                        : Color.orange
                 )
             }
 
@@ -220,69 +292,88 @@ private struct ApexCardioLockScreenView: View {
                     alignment: .leading,
                     spacing: 4
                 ) {
-                    HStack(
-                        spacing: 7
-                    ) {
-                        Circle()
-                            .fill(
-                                ApexCardioStatusStyle.color(
-                                    for: context.state
-                                )
-                            )
-                            .frame(
-                                width: 8,
-                                height: 8
-                            )
-
-                        Text(
-                            context.state.statusText
+                    Text(
+                        context.attributes.recordingName
+                    )
+                    .font(
+                        .system(
+                            size: 17,
+                            weight: .semibold
                         )
-                        .font(
-                            .system(
-                                size: 14,
-                                weight: .medium
-                            )
-                        )
-                    }
+                    )
+                    .lineLimit(1)
+                    .foregroundStyle(
+                        .white
+                    )
 
                     Text(
-                        context.state.isConnected
-                            ? "ECG + Respiration"
-                            : "Waiting for ApexCardio"
+                        context.state.statusText
                     )
                     .font(
                         .system(
                             size: 12,
-                            weight: .regular
+                            weight: .medium
                         )
                     )
                     .foregroundStyle(
-                        .secondary
+                        .white.opacity(0.62)
                     )
                 }
 
-                Spacer()
+                Spacer(
+                    minLength: 14
+                )
 
                 Text(
-                    timerInterval:
-                        context.attributes.startedAt...Date.distantFuture,
-                    countsDown: false
+                    context.attributes.startedAt,
+                    style: .timer
                 )
                 .font(
                     .system(
-                        size: 27,
+                        size: 26,
                         weight: .medium,
                         design: .monospaced
                     )
                 )
                 .monospacedDigit()
-                .contentTransition(
-                    .numericText()
+                .foregroundStyle(
+                    .white
                 )
             }
 
+            HStack(
+                spacing: 8
+            ) {
+                ApexCardioSignalBadge(
+                    title: "ECG",
+                    active:
+                        context.state.isConnected
+                )
+
+                ApexCardioSignalBadge(
+                    title: "RESP",
+                    active:
+                        context.state.isConnected
+                )
+
+                Spacer()
+
+                Text("250 Hz")
+                    .font(
+                        .system(
+                            size: 11,
+                            weight: .medium,
+                            design: .monospaced
+                        )
+                    )
+                    .foregroundStyle(
+                        .white.opacity(0.48)
+                    )
+            }
+
             ApexCardioActivityControls(
-                isPaused: context.state.isPaused,
+                isPaused:
+                    context.state.isPaused,
                 compact: false
             )
         }
@@ -292,80 +383,64 @@ private struct ApexCardioLockScreenView: View {
     }
 }
 
-private struct ApexCardioConnectionIndicator: View {
-    let connected: Bool
+private struct ApexCardioSignalBadge: View {
+    let title: String
+    let active: Bool
 
     var body: some View {
-        HStack(
-            spacing: 5
-        ) {
-            Image(
-                systemName:
-                    connected
-                    ? "bluetooth"
-                    : "bluetooth.slash"
-            )
+        Text(title)
             .font(
                 .system(
-                    size: 11,
-                    weight: .semibold
+                    size: 10,
+                    weight: .semibold,
+                    design: .rounded
                 )
             )
-
-            Text(
-                connected
-                    ? "Connected"
-                    : "Disconnected"
+            .foregroundStyle(
+                active
+                    ? Color.mint
+                    : Color.white.opacity(0.38)
             )
-            .font(
-                .system(
-                    size: 11,
-                    weight: .medium
-                )
+            .padding(
+                .horizontal,
+                8
             )
-        }
-        .foregroundStyle(
-            connected
-                ? Color.mint
-                : Color.orange
-        )
+            .padding(
+                .vertical,
+                4
+            )
+            .background(
+                Capsule()
+                    .fill(
+                        Color.white.opacity(0.08)
+                    )
+            )
     }
 }
 
-private struct ApexCardioCompactStatus: View {
+private struct ApexCardioRecordingDot: View {
     let state:
         ApexCardioRecordingAttributes.ContentState
+    let size: CGFloat
 
     var body: some View {
-        HStack(
-            spacing: 4
-        ) {
-            Circle()
-                .fill(
+        Circle()
+            .fill(
+                ApexCardioStatusStyle.color(
+                    for: state
+                )
+            )
+            .frame(
+                width: size,
+                height: size
+            )
+            .shadow(
+                color:
                     ApexCardioStatusStyle.color(
                         for: state
-                    )
-                )
-                .frame(
-                    width: 7,
-                    height: 7
-                )
-
-            Image(
-                systemName:
-                    state.isPaused
-                    ? "pause.fill"
-                    : state.isConnected
-                        ? "record.circle.fill"
-                        : "exclamationmark"
+                    ).opacity(0.45),
+                radius: 3
             )
-            .font(
-                .system(
-                    size: 11,
-                    weight: .semibold
-                )
-            )
-        }
     }
 }
 
@@ -379,7 +454,7 @@ private struct ApexCardioActivityControls: View {
             *
         ) {
             HStack(
-                spacing: compact ? 18 : 12
+                spacing: 9
             ) {
                 if isPaused {
                     Button(
@@ -387,8 +462,8 @@ private struct ApexCardioActivityControls: View {
                             ApexCardioResumeRecordingIntent()
                     ) {
                         ApexCardioControlLabel(
-                            systemName: "play.fill",
                             title: "Resume",
+                            systemName: "play.fill",
                             compact: compact
                         )
                     }
@@ -399,8 +474,8 @@ private struct ApexCardioActivityControls: View {
                             ApexCardioPauseRecordingIntent()
                     ) {
                         ApexCardioControlLabel(
-                            systemName: "pause.fill",
                             title: "Pause",
+                            systemName: "pause.fill",
                             compact: compact
                         )
                     }
@@ -412,8 +487,8 @@ private struct ApexCardioActivityControls: View {
                         ApexCardioStopRecordingIntent()
                 ) {
                     ApexCardioControlLabel(
-                        systemName: "stop.fill",
                         title: "Stop",
+                        systemName: "stop.fill",
                         compact: compact
                     )
                 }
@@ -421,13 +496,21 @@ private struct ApexCardioActivityControls: View {
             }
         } else {
             HStack(
-                spacing: 8
+                spacing: 6
             ) {
-                Image(
-                    systemName:
-                        isPaused
-                        ? "pause.circle.fill"
-                        : "record.circle.fill"
+                ApexCardioRecordingDot(
+                    state:
+                        ApexCardioRecordingAttributes
+                            .ContentState(
+                                isPaused: isPaused,
+                                isConnected: true,
+                                statusText:
+                                    isPaused
+                                        ? "Paused"
+                                        : "Recording",
+                                updatedAt: Date()
+                            ),
+                    size: 8
                 )
 
                 Text(
@@ -437,69 +520,67 @@ private struct ApexCardioActivityControls: View {
                 )
                 .font(
                     .system(
-                        size: 13,
+                        size: 12,
                         weight: .medium
                     )
                 )
+                .foregroundStyle(
+                    .white.opacity(0.65)
+                )
             }
-            .foregroundStyle(
-                .secondary
-            )
         }
     }
 }
 
 private struct ApexCardioControlLabel: View {
-    let systemName: String
     let title: String
+    let systemName: String
     let compact: Bool
 
     var body: some View {
         HStack(
-            spacing: 7
+            spacing: 6
         ) {
             Image(
                 systemName: systemName
             )
             .font(
                 .system(
-                    size: compact ? 14 : 15,
-                    weight: .semibold
+                    size: 12,
+                    weight: .bold
                 )
             )
 
-            if !compact {
-                Text(title)
-                    .font(
-                        .system(
-                            size: 14,
-                            weight: .semibold
-                        )
+            Text(title)
+                .font(
+                    .system(
+                        size: 12,
+                        weight: .semibold
                     )
-            }
+                )
         }
+        .foregroundStyle(
+            .white
+        )
         .frame(
             maxWidth:
                 compact
-                ? nil
-                : .infinity
+                    ? nil
+                    : .infinity
         )
         .padding(
             .horizontal,
-            compact ? 10 : 14
+            compact ? 11 : 14
         )
         .padding(
             .vertical,
-            compact ? 7 : 10
+            compact ? 7 : 9
         )
         .background(
             Capsule()
                 .fill(
                     Color.white.opacity(0.11)
                 )
-        )
-        .contentShape(
-            Capsule()
         )
     }
 }
@@ -517,6 +598,10 @@ private enum ApexCardioStatusStyle {
             return .orange
         }
 
-        return .red
+        return Color(
+            red: 0.95,
+            green: 0.20,
+            blue: 0.22
+        )
     }
 }

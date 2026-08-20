@@ -5,11 +5,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'recording_database.dart';
 
@@ -34,8 +36,8 @@ class RecordingReportService {
   final RecordingDatabase _database = RecordingDatabase.instance;
 
   static const int _chunkPageSize = 400;
-  static const int _chartTargetPoints = 1400;
-  static const int _excerptRows = 120;
+  static const int _chartTargetPoints = 1000;
+  static const int _excerptRows = 64;
   static const int _analysisMaxSamples = 75000;
   static const int _detailChartSeconds = 12;
 
@@ -73,10 +75,21 @@ class RecordingReportService {
     );
   }
 
-  Future<void> shareReport({required int recordingId}) async {
+  Future<void> shareReport({
+    required int recordingId,
+    ui.Rect? sharePositionOrigin,
+  }) async {
     final result = await generateReportFile(recordingId: recordingId);
 
-    await Printing.sharePdf(bytes: result.bytes, filename: result.fileName);
+    await SharePlus.instance.share(
+      ShareParams(
+        files: <XFile>[XFile(result.filePath, mimeType: 'application/pdf')],
+        fileNameOverrides: <String>[result.fileName],
+        title: 'ApexCardio report',
+        subject: result.fileName,
+        sharePositionOrigin: sharePositionOrigin,
+      ),
+    );
   }
 
   Future<void> printReport({required int recordingId}) async {
@@ -209,6 +222,7 @@ class RecordingReportService {
             ),
           );
         },
+        maxPages: 80,
         build: (context) {
           return [
             _buildTitleSection(recording, analysis, accent, accentDark, soft),
@@ -802,7 +816,11 @@ class RecordingReportService {
           pw.Text(subtitle, style: const pw.TextStyle(fontSize: 9)),
           pw.SizedBox(height: 8),
           pw.Center(
-            child: pw.Image(pw.MemoryImage(image), fit: pw.BoxFit.contain),
+            child: pw.Image(
+              pw.MemoryImage(image),
+              fit: pw.BoxFit.contain,
+              height: 125,
+            ),
           ),
         ],
       ),
@@ -816,7 +834,7 @@ class RecordingReportService {
     PdfColor muted,
   ) {
     final rows = analysis.firstExcerpt
-        .take(60)
+        .take(32)
         .map((sample) {
           return [
             sample.index.toString(),
@@ -922,7 +940,7 @@ class RecordingReportService {
     PdfColor muted,
   ) {
     final rows = analysis.lastExcerpt
-        .take(60)
+        .take(32)
         .map((sample) {
           return [
             sample.index.toString(),
@@ -1182,8 +1200,8 @@ class RecordingReportService {
             title: 'ECG Overview',
             points: overviewEcg,
             color: const ui.Color(0xFF0F766E),
-            width: 1000,
-            height: 220,
+            width: 820,
+            height: 180,
           );
 
     final respOverviewChart = overviewResp.isEmpty
@@ -1192,8 +1210,8 @@ class RecordingReportService {
             title: 'Respiration Overview',
             points: overviewResp,
             color: const ui.Color(0xFF7C3AED),
-            width: 1000,
-            height: 220,
+            width: 820,
+            height: 180,
           );
 
     final ecgDetailChart = detailEcg.isEmpty
@@ -1202,8 +1220,8 @@ class RecordingReportService {
             title: 'Detailed ECG Segment',
             points: detailEcg,
             color: const ui.Color(0xFF0F766E),
-            width: 1000,
-            height: 220,
+            width: 820,
+            height: 180,
           );
 
     final respDetailChart = detailResp.isEmpty
@@ -1212,8 +1230,8 @@ class RecordingReportService {
             title: 'Detailed Respiration Segment',
             points: detailResp,
             color: const ui.Color(0xFF7C3AED),
-            width: 1000,
-            height: 220,
+            width: 820,
+            height: 180,
           );
 
     final pausedGapCount = gapObjects

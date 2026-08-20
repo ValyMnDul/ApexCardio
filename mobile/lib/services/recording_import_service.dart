@@ -23,14 +23,24 @@ class RecordingImportService {
   static const int _batchChunkCount = 300;
 
   Future<int?> pickAndImport() async {
-    const typeGroup = XTypeGroup(
-      label: 'ApexCardio recordings',
-      extensions: <String>['apex', 'csv', 'db', 'sqlite', 'sqlite3'],
-    );
+    final XTypeGroup typeGroup;
 
-    final file = await openFile(
-      acceptedTypeGroups: const <XTypeGroup>[typeGroup],
-    );
+    if (Platform.isIOS) {
+      typeGroup = const XTypeGroup(
+        label: 'ApexCardio recordings',
+        uniformTypeIdentifiers: <String>[
+          'public.data',
+          'public.comma-separated-values-text',
+        ],
+      );
+    } else {
+      typeGroup = const XTypeGroup(
+        label: 'ApexCardio recordings',
+        extensions: <String>['apex', 'csv', 'db', 'sqlite', 'sqlite3'],
+      );
+    }
+
+    final file = await openFile(acceptedTypeGroups: <XTypeGroup>[typeGroup]);
 
     if (file == null) {
       return null;

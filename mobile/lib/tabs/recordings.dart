@@ -110,72 +110,106 @@ class _RecordingsState extends State<Recordings> {
     final result = await showDialog<_CreateRecordingData>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Create recording'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  autofocus: true,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Recording name',
-                    prefixIcon: Icon(Icons.edit_rounded),
+        final media = MediaQuery.of(dialogContext);
+        final width = (media.size.width - 32).clamp(0.0, 420.0).toDouble();
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          child: SizedBox(
+            width: width,
+            height: 440,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Create recording',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(dialogContext).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w600),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: notesController,
-                  minLines: 2,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.newline,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
-                    hintText: 'Optional',
-                    prefixIcon: Icon(Icons.notes_rounded),
-                    alignLabelWithHint: true,
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    maxLines: 1,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Recording name',
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: additionalController,
-                  minLines: 2,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.newline,
-                  decoration: const InputDecoration(
-                    labelText: 'Additional information',
-                    hintText: 'Optional',
-                    prefixIcon: Icon(Icons.info_outline_rounded),
-                    alignLabelWithHint: true,
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 92,
+                    child: TextField(
+                      controller: notesController,
+                      expands: true,
+                      minLines: null,
+                      maxLines: null,
+                      textAlignVertical: TextAlignVertical.top,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes',
+                        hintText: 'Optional',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 92,
+                    child: TextField(
+                      controller: additionalController,
+                      expands: true,
+                      minLines: null,
+                      maxLines: null,
+                      textAlignVertical: TextAlignVertical.top,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        labelText: 'Additional information',
+                        hintText: 'Optional',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () {
+                            Navigator.pop(dialogContext);
+                          },
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                              _CreateRecordingData(
+                                name: nameController.text,
+                                notes: notesController.text,
+                                additionalInformation:
+                                    additionalController.text,
+                              ),
+                            );
+                          },
+                          child: const Text('Start recording'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  _CreateRecordingData(
-                    name: nameController.text,
-                    notes: notesController.text,
-                    additionalInformation: additionalController.text,
-                  ),
-                );
-              },
-              icon: const Icon(Icons.fiber_manual_record_rounded),
-              label: const Text('Start'),
-            ),
-          ],
         );
       },
     );
@@ -493,12 +527,15 @@ class _RecordingsState extends State<Recordings> {
                 child: _buildHeader(context, recording),
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              sliver: SliverToBoxAdapter(
-                child: _buildActiveRecording(context, recording),
+            if (recording.hasActiveRecording ||
+                !recording.initialized ||
+                recording.hasError)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                sliver: SliverToBoxAdapter(
+                  child: _buildActiveRecording(context, recording),
+                ),
               ),
-            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
               sliver: SliverToBoxAdapter(
@@ -645,51 +682,7 @@ class _RecordingsState extends State<Recordings> {
     }
 
     if (!recording.hasActiveRecording) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainer,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: scheme.outlineVariant),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: scheme.primary.withValues(alpha: 0.10),
-              ),
-              child: Icon(Icons.monitor_heart_outlined, color: scheme.primary),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No active recording',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    recording.bleConnected
-                        ? 'ApexCardio is ready to record.'
-                        : 'You can create a recording now. Missing signal time will be stored as a gap until ApexCardio connects.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     final paused = recording.isPaused;

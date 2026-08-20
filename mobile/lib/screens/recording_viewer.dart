@@ -27,8 +27,11 @@ class _RecordingViewerState extends State<RecordingViewer> {
 
   bool _loadingRecording = true;
   bool _loadingWindow = false;
+  bool _loadingMetrics = false;
   bool _workingAction = false;
   String? _error;
+
+  _ViewerMetrics? _metrics;
 
   int _timelineDurationUs = 0;
   int _windowStartUs = 0;
@@ -99,7 +102,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
         _loadingRecording = false;
       });
 
-      await _loadVisibleWindow();
+      await Future.wait<void>([_loadVisibleWindow(), _loadOverviewMetrics()]);
     } catch (error) {
       if (!mounted) {
         return;
@@ -110,6 +113,235 @@ class _RecordingViewerState extends State<RecordingViewer> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _loadOverviewMetrics() async {
+    if (_loadingMetrics) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingMetrics = true;
+      });
+    }
+
+    try {
+      final db = await _database.database;
+      final ecgValues = <double>[];
+      final respirationValues = <double>[];
+
+      const analysisMaxSamples = 75000;
+      const chunkPageSize = 300;
+
+      var lastChunkIndex = -1;
+
+      while (ecgValues.length < analysisMaxSamples) {
+        final rows = await db.query(
+          'signal_chunks',
+          where: 'recording_id = ? AND chunk_index > ?',
+          whereArgs: <Object?>[widget.recordingId, lastChunkIndex],
+          orderBy: 'chunk_index ASC',
+          limit: chunkPageSize,
+        );
+
+        if (rows.isEmpty) {
+          break;
+        }
+
+        for (final row in rows) {
+          lastChunkIndex = row['chunk_index'] as int? ?? lastChunkIndex;
+
+          final sampleCount = row['sample_count'] as int? ?? 0;
+          final raw = row['signal_data'];
+
+          final bytes = switch (raw) {
+            Uint8List value => value,
+            List<int> value => Uint8List.fromList(value),
+            _ => null,
+          };
+
+          if (bytes == null ||
+              sampleCount <= 0 ||
+              bytes.length < sampleCount * 8) {
+            continue;
+          }
+
+          final data = ByteData.sublistView(bytes);
+
+          for (int i = 0; i < sampleCount; i++) {
+            if (ecgValues.length >= analysisMaxSamples) {
+              break;
+            }
+
+            final offset = i * 8;
+
+            ecgValues.add(data.getInt32(offset, Endian.little).toDouble());
+
+            respirationValues.add(
+              data.getInt32(offset + 4, Endian.little).toDouble(),
+            );
+          }
+        }
+      }
+
+      final heart = _estimateRate(
+        values: ecgValues,
+        sampleRate: _sampleRate,
+        minimumDistanceSeconds: 0.28,
+        thresholdMultiplier: 0.95,
+        smoothingRadius: 2,
+      );
+
+      final respiration = _estimateRate(
+        values: respirationValues,
+        sampleRate: _sampleRate,
+        minimumDistanceSeconds: 1.20,
+        thresholdMultiplier: 0.30,
+        smoothingRadius: 8,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _metrics = _ViewerMetrics(
+          estimatedHeartRateBpm: heart.rateBpm,
+          estimatedMeanRrMs: heart.intervalMs,
+          estimatedRespirationRateBpm: respiration.rateBpm,
+          estimatedMeanBreathMs: respiration.intervalMs,
+          analyzedSamples: ecgValues.length,
+        );
+        _loadingMetrics = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loadingMetrics = false;
+      });
+    }
+  }
+
+  _ViewerRateEstimate _estimateRate({
+    required List<double> values,
+    required double sampleRate,
+    required double minimumDistanceSeconds,
+    required double thresholdMultiplier,
+    required int smoothingRadius,
+  }) {
+    if (values.length < 6 || sampleRate <= 0) {
+      return const _ViewerRateEstimate(rateBpm: null, intervalMs: null);
+    }
+
+    final smoothed = _smoothValues(values, radius: smoothingRadius);
+
+    final mean = smoothed.reduce((a, b) => a + b) / smoothed.length;
+
+    var variance = 0.0;
+
+    for (final value in smoothed) {
+      final difference = value - mean;
+      variance += difference * difference;
+    }
+
+    variance /= smoothed.length;
+    final standardDeviation = math.sqrt(variance);
+
+    if (!standardDeviation.isFinite || standardDeviation <= 0) {
+      return const _ViewerRateEstimate(rateBpm: null, intervalMs: null);
+    }
+
+    final threshold = mean + standardDeviation * thresholdMultiplier;
+
+    final minimumDistanceSamples = math.max(
+      1,
+      (minimumDistanceSeconds * sampleRate).round(),
+    );
+
+    final peaks = <int>[];
+    var lastPeak = -minimumDistanceSamples;
+
+    for (int i = 1; i < smoothed.length - 1; i++) {
+      final current = smoothed[i];
+
+      if (current < threshold ||
+          current < smoothed[i - 1] ||
+          current < smoothed[i + 1]) {
+        continue;
+      }
+
+      if (i - lastPeak < minimumDistanceSamples) {
+        if (peaks.isNotEmpty && current > smoothed[peaks.last]) {
+          peaks[peaks.length - 1] = i;
+          lastPeak = i;
+        }
+
+        continue;
+      }
+
+      peaks.add(i);
+      lastPeak = i;
+    }
+
+    if (peaks.length < 2) {
+      return const _ViewerRateEstimate(rateBpm: null, intervalMs: null);
+    }
+
+    var intervalSumSeconds = 0.0;
+    var intervalCount = 0;
+
+    for (int i = 1; i < peaks.length; i++) {
+      final delta = peaks[i] - peaks[i - 1];
+
+      if (delta <= 0) {
+        continue;
+      }
+
+      intervalSumSeconds += delta / sampleRate;
+      intervalCount++;
+    }
+
+    if (intervalCount == 0) {
+      return const _ViewerRateEstimate(rateBpm: null, intervalMs: null);
+    }
+
+    final averageIntervalSeconds = intervalSumSeconds / intervalCount;
+
+    if (!averageIntervalSeconds.isFinite || averageIntervalSeconds <= 0) {
+      return const _ViewerRateEstimate(rateBpm: null, intervalMs: null);
+    }
+
+    return _ViewerRateEstimate(
+      rateBpm: 60.0 / averageIntervalSeconds,
+      intervalMs: averageIntervalSeconds * 1000,
+    );
+  }
+
+  List<double> _smoothValues(List<double> values, {required int radius}) {
+    if (radius <= 0 || values.length < 3) {
+      return List<double>.from(values);
+    }
+
+    final output = List<double>.filled(values.length, 0, growable: false);
+
+    final prefix = List<double>.filled(values.length + 1, 0, growable: false);
+
+    for (int i = 0; i < values.length; i++) {
+      prefix[i + 1] = prefix[i] + values[i];
+    }
+
+    for (int i = 0; i < values.length; i++) {
+      final start = math.max(0, i - radius);
+      final end = math.min(values.length - 1, i + radius);
+
+      output[i] = (prefix[end + 1] - prefix[start]) / (end - start + 1);
+    }
+
+    return output;
   }
 
   Future<void> _loadVisibleWindow() async {
@@ -429,9 +661,16 @@ class _RecordingViewerState extends State<RecordingViewer> {
   }
 
   Future<void> _sharePdfReport() async {
+    final box = context.findRenderObject() as RenderBox?;
+
+    final origin = box == null
+        ? null
+        : box.localToGlobal(Offset.zero) & box.size;
+
     await _runViewerAction(() async {
       await RecordingReportService.instance.shareReport(
         recordingId: widget.recordingId,
+        sharePositionOrigin: origin,
       );
     }, successMessage: 'PDF report ready');
   }
@@ -587,12 +826,11 @@ class _RecordingViewerState extends State<RecordingViewer> {
                 ),
               ),
             ),
-          IconButton(
+          TextButton(
             onPressed: recording == null || _workingAction
                 ? null
                 : _editDetails,
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Edit',
+            child: const Text('Edit'),
           ),
           PopupMenuButton<_ViewerAction>(
             enabled: recording != null && !_workingAction,
@@ -616,44 +854,20 @@ class _RecordingViewerState extends State<RecordingViewer> {
             itemBuilder: (_) => const [
               PopupMenuItem(
                 value: _ViewerAction.sharePdf,
-                child: Row(
-                  children: [
-                    Icon(Icons.picture_as_pdf_outlined),
-                    SizedBox(width: 10),
-                    Text('Generate / Share PDF'),
-                  ],
-                ),
+                child: Text('Generate / Share PDF'),
               ),
               PopupMenuItem(
                 value: _ViewerAction.printPdf,
-                child: Row(
-                  children: [
-                    Icon(Icons.print_outlined),
-                    SizedBox(width: 10),
-                    Text('Print PDF report'),
-                  ],
-                ),
+                child: Text('Print PDF report'),
               ),
               PopupMenuDivider(),
               PopupMenuItem(
                 value: _ViewerAction.exportApex,
-                child: Row(
-                  children: [
-                    Icon(Icons.archive_outlined),
-                    SizedBox(width: 10),
-                    Text('Export .apex'),
-                  ],
-                ),
+                child: Text('Export .apex'),
               ),
               PopupMenuItem(
                 value: _ViewerAction.exportCsv,
-                child: Row(
-                  children: [
-                    Icon(Icons.table_chart_outlined),
-                    SizedBox(width: 10),
-                    Text('Export CSV'),
-                  ],
-                ),
+                child: Text('Export CSV'),
               ),
             ],
           ),
@@ -687,13 +901,17 @@ class _RecordingViewerState extends State<RecordingViewer> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         children: [
-          _RecordingSummaryCard(
+          _RecordingOverview(
             startedAt: _formatDateTime(startedAtMs),
             timelineDuration: _formatDurationUs(timelineUs),
             measuredDuration: _formatDuration(measuredDuration),
+            timelineDurationUs: timelineUs,
             sampleRate: _sampleRate,
+            sampleCount: sampleCount,
             status: status,
             notes: notes,
+            metrics: _metrics,
+            loadingMetrics: _loadingMetrics,
           ),
           const SizedBox(height: 16),
           Row(
@@ -734,27 +952,27 @@ class _RecordingViewerState extends State<RecordingViewer> {
           const SizedBox(height: 10),
           Row(
             children: [
-              IconButton.filledTonal(
-                onPressed: () {
-                  _zoomBy(0.5);
-                },
-                icon: const Icon(Icons.zoom_in_rounded),
-                tooltip: 'Zoom in',
+              SizedBox(
+                width: 44,
+                child: OutlinedButton(
+                  onPressed: () {
+                    _zoomBy(0.5);
+                  },
+                  child: const Text('+'),
+                ),
               ),
               const SizedBox(width: 8),
-              IconButton.filledTonal(
-                onPressed: () {
-                  _zoomBy(2.0);
-                },
-                icon: const Icon(Icons.zoom_out_rounded),
-                tooltip: 'Zoom out',
+              SizedBox(
+                width: 44,
+                child: OutlinedButton(
+                  onPressed: () {
+                    _zoomBy(2.0);
+                  },
+                  child: const Text('−'),
+                ),
               ),
               const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: _resetWindow,
-                icon: const Icon(Icons.restart_alt_rounded),
-                label: const Text('Reset'),
-              ),
+              TextButton(onPressed: _resetWindow, child: const Text('Reset')),
               const Spacer(),
               Text(
                 '${_samples.length} samples',
@@ -1163,6 +1381,29 @@ class _RecordingSignalPainter extends CustomPainter {
   }
 }
 
+class _ViewerMetrics {
+  final double? estimatedHeartRateBpm;
+  final double? estimatedMeanRrMs;
+  final double? estimatedRespirationRateBpm;
+  final double? estimatedMeanBreathMs;
+  final int analyzedSamples;
+
+  const _ViewerMetrics({
+    required this.estimatedHeartRateBpm,
+    required this.estimatedMeanRrMs,
+    required this.estimatedRespirationRateBpm,
+    required this.estimatedMeanBreathMs,
+    required this.analyzedSamples,
+  });
+}
+
+class _ViewerRateEstimate {
+  final double? rateBpm;
+  final double? intervalMs;
+
+  const _ViewerRateEstimate({required this.rateBpm, required this.intervalMs});
+}
+
 class _DecodedSample {
   final int elapsedUs;
   final double ecg;
@@ -1232,11 +1473,13 @@ class _GapTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            gap.reason == 'paused'
-                ? Icons.pause_circle_outline_rounded
-                : Icons.bluetooth_disabled_rounded,
-            color: scheme.onSurfaceVariant,
+          Container(
+            width: 4,
+            height: 34,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              color: gap.reason == 'paused' ? scheme.tertiary : scheme.error,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1264,30 +1507,48 @@ class _GapTile extends StatelessWidget {
   }
 }
 
-class _RecordingSummaryCard extends StatelessWidget {
+class _RecordingOverview extends StatelessWidget {
   final String startedAt;
   final String timelineDuration;
   final String measuredDuration;
+  final int timelineDurationUs;
   final double sampleRate;
+  final int sampleCount;
   final String status;
   final String? notes;
+  final _ViewerMetrics? metrics;
+  final bool loadingMetrics;
 
-  const _RecordingSummaryCard({
+  const _RecordingOverview({
     required this.startedAt,
     required this.timelineDuration,
     required this.measuredDuration,
+    required this.timelineDurationUs,
     required this.sampleRate,
+    required this.sampleCount,
     required this.status,
     required this.notes,
+    required this.metrics,
+    required this.loadingMetrics,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final heartRate = metrics?.estimatedHeartRateBpm;
+    final respirationRate = metrics?.estimatedRespirationRateBpm;
+    final rrMs = metrics?.estimatedMeanRrMs;
+    final breathMs = metrics?.estimatedMeanBreathMs;
+
+    final timelineSeconds = timelineDurationUs / Duration.microsecondsPerSecond;
+    final measuredSeconds = sampleRate <= 0 ? 0.0 : sampleCount / sampleRate;
+    final coverage = timelineSeconds <= 0
+        ? 0.0
+        : (measuredSeconds / timelineSeconds * 100).clamp(0.0, 100.0);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(16),
@@ -1296,43 +1557,82 @@ class _RecordingSummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(
+            height: 76,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _VitalReading(
+                    value: loadingMetrics
+                        ? '...'
+                        : heartRate == null
+                        ? '--'
+                        : heartRate.round().toString(),
+                    unit: 'BPM',
+                    label: 'Estimated avg heart rate',
+                    accent: const Color(0xFFE74C4C),
+                  ),
+                ),
+                Container(width: 1, height: 46, color: scheme.outlineVariant),
+                Expanded(
+                  child: _VitalReading(
+                    value: loadingMetrics
+                        ? '...'
+                        : respirationRate == null
+                        ? '--'
+                        : respirationRate.round().toString(),
+                    unit: 'brpm',
+                    label: 'Estimated respiration',
+                    accent: scheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 18, color: scheme.outlineVariant),
           Wrap(
             spacing: 18,
-            runSpacing: 12,
+            runSpacing: 10,
             children: [
-              _SummaryValue(
-                label: 'Started',
-                value: startedAt,
-                icon: Icons.calendar_today_outlined,
+              _TechnicalFact(
+                label: 'R-R',
+                value: rrMs == null ? '--' : '${rrMs.toStringAsFixed(0)} ms',
               ),
-              _SummaryValue(
-                label: 'Timeline',
-                value: timelineDuration,
-                icon: Icons.schedule_rounded,
+              _TechnicalFact(
+                label: 'Breath interval',
+                value: breathMs == null
+                    ? '--'
+                    : '${breathMs.toStringAsFixed(0)} ms',
               ),
-              _SummaryValue(
-                label: 'Measured',
-                value: measuredDuration,
-                icon: Icons.monitor_heart_outlined,
-              ),
-              _SummaryValue(
+              _TechnicalFact(
                 label: 'Sample rate',
                 value: '${sampleRate.toStringAsFixed(0)} Hz',
-                icon: Icons.speed_rounded,
               ),
-              _SummaryValue(
-                label: 'Status',
-                value: _statusLabel(status),
-                icon: _statusIcon(status),
+              _TechnicalFact(
+                label: 'Samples',
+                value: _formatSampleCount(sampleCount),
               ),
+              _TechnicalFact(
+                label: 'Signal coverage',
+                value: '${coverage.toStringAsFixed(1)}%',
+              ),
+              _TechnicalFact(label: 'Measured', value: measuredDuration),
+              _TechnicalFact(label: 'Timeline', value: timelineDuration),
+              _TechnicalFact(label: 'Started', value: startedAt, width: 190),
+              _TechnicalFact(label: 'Status', value: _statusLabel(status)),
             ],
           ),
           if (notes != null && notes!.trim().isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Divider(color: scheme.outlineVariant),
-            const SizedBox(height: 8),
-            Text(notes!, style: Theme.of(context).textTheme.bodyMedium),
+            Divider(height: 20, color: scheme.outlineVariant),
+            Text(notes!, style: Theme.of(context).textTheme.bodySmall),
           ],
+          const SizedBox(height: 8),
+          Text(
+            'Rate values are signal-derived estimates and are not a medical diagnosis.',
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
         ],
       ),
     );
@@ -1351,61 +1651,122 @@ class _RecordingSummaryCard extends StatelessWidget {
     }
   }
 
-  static IconData _statusIcon(String status) {
-    switch (status) {
-      case 'recording':
-        return Icons.fiber_manual_record_rounded;
-      case 'paused':
-        return Icons.pause_rounded;
-      case 'interrupted':
-        return Icons.warning_amber_rounded;
-      default:
-        return Icons.check_circle_outline_rounded;
+  static String _formatSampleCount(int count) {
+    if (count >= 1000000) {
+      return '${(count / 1000000).toStringAsFixed(2)}M';
     }
+
+    if (count >= 1000) {
+      return '${(count / 1000).toStringAsFixed(1)}K';
+    }
+
+    return '$count';
   }
 }
 
-class _SummaryValue extends StatelessWidget {
-  final String label;
+class _VitalReading extends StatelessWidget {
   final String value;
-  final IconData icon;
+  final String unit;
+  final String label;
+  final Color accent;
 
-  const _SummaryValue({
-    required this.label,
+  const _VitalReading({
     required this.value,
-    required this.icon,
+    required this.unit,
+    required this.label,
+    required this.accent,
   });
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
 
-    return SizedBox(
-      width: 145,
-      child: Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                margin: const EdgeInsets.only(right: 7, bottom: 5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accent,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
+              ),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  unit,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                  ).textTheme.labelSmall?.copyWith(color: muted),
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TechnicalFact extends StatelessWidget {
+  final String label;
+  final String value;
+  final double width;
+
+  const _TechnicalFact({
+    required this.label,
+    required this.value,
+    this.width = 132,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return SizedBox(
+      width: width,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),
