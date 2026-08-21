@@ -752,43 +752,26 @@ class _RecordingViewerState extends State<RecordingViewer> {
 
     setState(() {
       _workingAction = true;
+      _error = null;
     });
 
     try {
       await action();
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(successMessage),
-          ),
-        );
     } catch (error) {
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              context
-                  .read<LanguageProvider>()
-                  .translate(
-                    "action_failed",
-                    <String, Object?>{
-                      "error": error,
-                    },
-                  ),
-            ),
-          ),
-        );
+      setState(() {
+        _error = context
+            .read<LanguageProvider>()
+            .translate(
+              "action_failed",
+              <String, Object?>{
+                "error": error,
+              },
+            );
+      });
     } finally {
       if (mounted) {
         setState(() {

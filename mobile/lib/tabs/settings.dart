@@ -25,21 +25,6 @@ class _SettingsState extends State<Settings> {
         context.read<RecordingProvider>();
 
     if (recording.hasActiveRecording) {
-      final language =
-          context.read<LanguageProvider>();
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              language.translate(
-                "stop_recording_to_connect",
-              ),
-            ),
-          ),
-        );
-
       return;
     }
 
@@ -276,26 +261,11 @@ class _SettingsState extends State<Settings> {
                                                   return;
                                                 }
 
-                                                Navigator.pop(
-                                                  context,
-                                                );
-
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                )
-                                                  ..hideCurrentSnackBar()
-                                                  ..showSnackBar(
-                                                    SnackBar(
-                                                      content:
-                                                          Text(
-                                                        language.translate(
-                                                          success
-                                                              ? "succes_connect"
-                                                              : "error_connect",
-                                                        ),
-                                                      ),
-                                                    ),
+                                                if (success) {
+                                                  Navigator.pop(
+                                                    context,
                                                   );
+                                                }
                                               },
                                               child:
                                                   Text(
@@ -415,17 +385,25 @@ class _SettingsState extends State<Settings> {
                   fit: BoxFit.scaleDown,
                   child: bleProvider
                           .isConnected
-                      ? TextButton(
+                      ? OutlinedButton.icon(
                           onPressed:
                               recordingProvider
                                       .hasActiveRecording
                                   ? null
                                   : bleProvider
                                       .disconnect,
-                          child: Text(
-                            languageProvider
-                                .translate(
-                              "disconnect",
+                          icon: const Icon(
+                            Icons.link_off_rounded,
+                            size: 18,
+                          ),
+                          label: FittedBox(
+                            fit:
+                                BoxFit.scaleDown,
+                            child: Text(
+                              languageProvider
+                                  .translate(
+                                "disconnect",
+                              ),
                             ),
                           ),
                         )

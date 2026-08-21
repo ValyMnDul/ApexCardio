@@ -144,11 +144,6 @@ class _RecordingsState extends State<Recordings> {
             (media.size.width - 32)
                 .clamp(0.0, 420.0)
                 .toDouble();
-        final height =
-            (media.size.height - 80)
-                .clamp(330.0, 420.0)
-                .toDouble();
-
         return Dialog(
           insetPadding:
               const EdgeInsets.symmetric(
@@ -157,7 +152,6 @@ class _RecordingsState extends State<Recordings> {
           ),
           child: SizedBox(
             width: width,
-            height: height,
             child: Padding(
               padding:
                   const EdgeInsets.fromLTRB(
@@ -167,6 +161,8 @@ class _RecordingsState extends State<Recordings> {
                 14,
               ),
               child: Column(
+                mainAxisSize:
+                    MainAxisSize.min,
                 crossAxisAlignment:
                     CrossAxisAlignment.stretch,
                 children: [
@@ -190,58 +186,58 @@ class _RecordingsState extends State<Recordings> {
                         ),
                   ),
                   const SizedBox(height: 16),
-                  Expanded(
-                    child:
-                        SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller:
-                                nameController,
-                            autofocus: true,
-                            maxLines: 1,
-                            textInputAction:
-                                TextInputAction
-                                    .next,
-                            decoration:
-                                InputDecoration(
-                              labelText:
-                                  language
-                                      .translate(
-                                "recording_name",
-                              ),
+                  SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize:
+                          MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller:
+                              nameController,
+                          autofocus: true,
+                          maxLines: 1,
+                          textInputAction:
+                              TextInputAction
+                                  .next,
+                          decoration:
+                              InputDecoration(
+                            labelText:
+                                language
+                                    .translate(
+                              "recording_name",
                             ),
                           ),
-                          const SizedBox(
-                            height: 14,
-                          ),
-                          TextField(
-                            controller:
-                                notesController,
-                            minLines: 2,
-                            maxLines: 5,
-                            maxLength: 500,
-                            textInputAction:
-                                TextInputAction
-                                    .newline,
-                            decoration:
-                                InputDecoration(
-                              labelText:
-                                  language
-                                      .translate(
-                                "notes",
-                              ),
-                              hintText:
-                                  language
-                                      .translate(
-                                "optional",
-                              ),
-                              alignLabelWithHint:
-                                  true,
+                        ),
+                        const SizedBox(
+                          height: 12,
+                        ),
+                        TextField(
+                          controller:
+                              notesController,
+                          minLines: 1,
+                          maxLines: 5,
+                          maxLength: 500,
+                          textInputAction:
+                              TextInputAction
+                                  .newline,
+                          decoration:
+                              InputDecoration(
+                            labelText:
+                                language
+                                    .translate(
+                              "notes",
                             ),
+                            hintText:
+                                language
+                                    .translate(
+                              "optional",
+                            ),
+                            alignLabelWithHint:
+                                true,
+                            counterText: '',
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -678,6 +674,8 @@ class _RecordingsState extends State<Recordings> {
                 14,
               ),
               child: Column(
+                mainAxisSize:
+                    MainAxisSize.min,
                 crossAxisAlignment:
                     CrossAxisAlignment
                         .stretch,
@@ -721,8 +719,8 @@ class _RecordingsState extends State<Recordings> {
                   TextField(
                     controller:
                         notesController,
-                    minLines: 2,
-                    maxLines: 6,
+                    minLines: 1,
+                    maxLines: 5,
                     maxLength: 500,
                     textInputAction:
                         TextInputAction
@@ -739,6 +737,7 @@ class _RecordingsState extends State<Recordings> {
                       ),
                       alignLabelWithHint:
                           true,
+                      counterText: '',
                     ),
                   ),
                   const SizedBox(
@@ -937,13 +936,8 @@ class _RecordingsState extends State<Recordings> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+    // Intentionally no snackbar. Recording state/errors are reflected
+    // by the page/provider instead of transient bottom popups.
   }
 
   String _defaultRecordingName() {
@@ -1670,52 +1664,52 @@ class _RecordingTileState
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 7,
-                      height:
-                          uiPreferences.compactRecordingList
-                              ? 30
-                              : 38,
-                      decoration:
-                          BoxDecoration(
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          8,
-                        ),
-                        color:
-                            _statusColor(
-                          context,
-                          status,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(
-                      width: 12,
-                    ),
                     Expanded(
                       child: Column(
                         crossAxisAlignment:
                             CrossAxisAlignment
                                 .start,
                         children: [
-                          Text(
-                            name,
-                            maxLines: 1,
-                            overflow:
-                                TextOverflow
-                                    .ellipsis,
-                            style:
-                                Theme.of(
-                              context,
-                            )
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(
-                                      fontWeight:
-                                          FontWeight
-                                              .w600,
-                                    ),
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration:
+                                    BoxDecoration(
+                                  shape:
+                                      BoxShape.circle,
+                                  color:
+                                      _statusColor(
+                                    context,
+                                    status,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(
+                                width: 9,
+                              ),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow:
+                                      TextOverflow
+                                          .ellipsis,
+                                  style:
+                                      Theme.of(
+                                    context,
+                                  )
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight:
+                                                FontWeight
+                                                    .w600,
+                                          ),
+                                ),
+                              ),
+                            ],
                           ),
                           SizedBox(
                             height:
@@ -1751,7 +1745,6 @@ class _RecordingTileState
                                     : 5,
                           ),
                           Text(
-                            '${widget.formatDuration(timelineUs)}  ·  '
                             '${language.translate(
                               "measured",
                               <String, Object?>{
@@ -1760,10 +1753,9 @@ class _RecordingTileState
                                   measuredSeconds,
                                 ),
                               },
-                            )}  ·  '
-                            '${sampleRate.toStringAsFixed(0)} Hz'
+                            )}'
                             '${status == "completed" ? "" : "  ·  ${_statusLabel(language, status)}"}',
-                            maxLines: 2,
+                            maxLines: 1,
                             overflow:
                                 TextOverflow
                                     .ellipsis,
@@ -1777,6 +1769,9 @@ class _RecordingTileState
                                       color:
                                           scheme
                                               .onSurfaceVariant,
+                                      fontWeight:
+                                          FontWeight
+                                              .w500,
                                     ),
                           ),
                         ],

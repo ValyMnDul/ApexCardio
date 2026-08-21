@@ -352,6 +352,29 @@ class BleProvider extends ChangeNotifier {
         }
       }
 
+      if (_lastManualDisconnectAt != null &&
+          device.isConnected) {
+        try {
+          await device.disconnect();
+
+          try {
+            await device.connectionState
+                .where(
+                  (state) =>
+                      state ==
+                      BluetoothConnectionState
+                          .disconnected,
+                )
+                .first
+                .timeout(
+                  const Duration(
+                    seconds: 2,
+                  ),
+                );
+          } catch (_) {}
+        } catch (_) {}
+      }
+
       if (!device.isConnected) {
         await device.connect(
           autoConnect: false,
@@ -371,6 +394,9 @@ class BleProvider extends ChangeNotifier {
 
         return false;
       }
+
+      _lastManualDisconnectAt =
+          null;
 
       return true;
     } catch (_) {
@@ -400,7 +426,7 @@ class BleProvider extends ChangeNotifier {
 
       await Future<void>.delayed(
         const Duration(
-          milliseconds: 180,
+          milliseconds: 250,
         ),
       );
     } finally {
@@ -754,31 +780,69 @@ class BleProvider extends ChangeNotifier {
     _reconnectRetryTimer?.cancel();
     _autoReconnectArmed = false;
 
+    final activation =
+        _activationFuture;
+
+    if (activation != null) {
+      try {
+        await activation.timeout(
+          const Duration(
+            milliseconds: 750,
+          ),
+        );
+      } catch (_) {}
+    }
+
     await _valueSubscription?.cancel();
     _valueSubscription = null;
 
     await _servicesResetSubscription?.cancel();
     _servicesResetSubscription = null;
 
-    await _connectionSubscription?.cancel();
-    _connectionSubscription = null;
-
     _displayTicker?.dispose();
     _displayTicker = null;
 
     _ecgCharacteristic = null;
     _isConnected = false;
-    _connectedDevice = null;
 
     if (disconnectDevice &&
         device != null) {
       try {
-        await device.disconnect();
+        if (device.isConnected) {
+          await device.disconnect();
+
+          try {
+            await device.connectionState
+                .where(
+                  (state) =>
+                      state ==
+                      BluetoothConnectionState
+                          .disconnected,
+                )
+                .first
+                .timeout(
+                  const Duration(
+                    seconds: 2,
+                  ),
+                );
+          } catch (_) {}
+        }
       } catch (_) {}
     }
 
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+
+    if (_connectedDevice == device) {
+      _connectedDevice = null;
+    }
+
+    _activationFuture = null;
+
     if (wasConnected) {
-      _connectionStateController.add(false);
+      _connectionStateController.add(
+        false,
+      );
     }
 
     _resetSignalState();
