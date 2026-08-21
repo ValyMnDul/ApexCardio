@@ -7,6 +7,7 @@ import '../providers/font.dart';
 import '../providers/ble.dart';
 import '../providers/live_ecg.dart';
 import '../providers/recording.dart';
+import '../providers/ui_preferences.dart';
 
 class Settings extends StatefulWidget {
   const Settings({super.key});
@@ -335,6 +336,8 @@ class _SettingsState extends State<Settings> {
         context.watch<LiveEcgProvider>();
     final recordingProvider =
         context.watch<RecordingProvider>();
+    final uiPreferences =
+        context.watch<UiPreferencesProvider>();
     final scheme =
         Theme.of(context).colorScheme;
 
@@ -362,134 +365,6 @@ class _SettingsState extends State<Settings> {
           28,
         ),
         children: [
-          Padding(
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 8,
-            ),
-            child: ListTile(
-              leading: Icon(
-                bleProvider.isConnected
-                    ? Icons
-                        .bluetooth_connected_rounded
-                    : Icons
-                        .bluetooth_disabled_rounded,
-                color: bleProvider.isConnected
-                    ? scheme.primary
-                    : scheme.error,
-              ),
-              title: Text(
-                bleProvider.isConnected
-                    ? languageProvider
-                        .translate(
-                          "ble_connected",
-                        )
-                    : languageProvider
-                        .translate(
-                          "ble_disconnected",
-                        ),
-                maxLines: 1,
-                overflow:
-                    TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight:
-                      FontWeight.w600,
-                ),
-              ),
-              subtitle: Text(
-                deviceName,
-                maxLines: 1,
-                overflow:
-                    TextOverflow.ellipsis,
-              ),
-              trailing:
-                  ConstrainedBox(
-                constraints:
-                    const BoxConstraints(
-                  maxWidth: 126,
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: bleProvider
-                          .isConnected
-                      ? TextButton(
-                          onPressed:
-                              recordingProvider
-                                      .hasActiveRecording
-                                  ? null
-                                  : bleProvider
-                                      .disconnect,
-                          child: Text(
-                            languageProvider
-                                .translate(
-                              "disconnect",
-                            ),
-                          ),
-                        )
-                      : FilledButton(
-                          onPressed:
-                              recordingProvider
-                                      .hasActiveRecording
-                                  ? null
-                                  : () {
-                                      _showBleScanDialog(
-                                        context,
-                                      );
-                                    },
-                          child: Text(
-                            languageProvider
-                                .translate(
-                              "ble_search",
-                            ),
-                          ),
-                        ),
-                ),
-              ),
-            ),
-          ),
-          Divider(
-            height: 18,
-            color: scheme.outlineVariant,
-          ),
-          _SectionHeader(
-            label: languageProvider.translate(
-              "device_behavior",
-            ),
-          ),
-          _SettingsSwitchRow(
-            icon: Icons.sync_rounded,
-            label: languageProvider.translate(
-              "auto_reconnect",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "auto_reconnect_desc",
-            ),
-            value:
-                bleProvider.autoReconnectEnabled,
-            onChanged:
-                bleProvider
-                    .setAutoReconnectEnabled,
-          ),
-          _SettingsSwitchRow(
-            icon: Icons.filter_alt_outlined,
-            label: languageProvider.translate(
-              "apex_only",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "apex_only_desc",
-            ),
-            value:
-                bleProvider.showOnlyApexDevices,
-            onChanged:
-                bleProvider
-                    .setShowOnlyApexDevices,
-          ),
-          Divider(
-            height: 18,
-            color: scheme.outlineVariant,
-          ),
           _SectionHeader(
             label: languageProvider.translate(
               "appearance_section",
@@ -583,6 +458,189 @@ class _SettingsState extends State<Settings> {
             onSelected:
                 fontScaleProvider
                     .setFontScale,
+          ),
+          Divider(
+            height: 28,
+            color: scheme.outlineVariant,
+          ),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "ui_section",
+            ),
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.circle_outlined,
+            label: languageProvider.translate(
+              "recording_indicator",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "recording_indicator_desc",
+            ),
+            value:
+                uiPreferences.showRecordingIndicator,
+            onChanged:
+                uiPreferences
+                    .setShowRecordingIndicator,
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.animation_rounded,
+            label: languageProvider.translate(
+              "recording_indicator_animation",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "recording_indicator_animation_desc",
+            ),
+            value:
+                uiPreferences.animateRecordingIndicator,
+            onChanged:
+                uiPreferences
+                    .setAnimateRecordingIndicator,
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.view_agenda_outlined,
+            label: languageProvider.translate(
+              "compact_recordings",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "compact_recordings_desc",
+            ),
+            value:
+                uiPreferences.compactRecordingList,
+            onChanged:
+                uiPreferences.setCompactRecordingList,
+          ),
+          Divider(
+            height: 28,
+            color: scheme.outlineVariant,
+          ),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "connected_device",
+            ),
+          ),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(
+              horizontal: 8,
+            ),
+            child: ListTile(
+              leading: Icon(
+                bleProvider.isConnected
+                    ? Icons
+                        .bluetooth_connected_rounded
+                    : Icons
+                        .bluetooth_disabled_rounded,
+                color: bleProvider.isConnected
+                    ? scheme.primary
+                    : scheme.error,
+              ),
+              title: Text(
+                bleProvider.isConnected
+                    ? languageProvider
+                        .translate(
+                          "ble_connected",
+                        )
+                    : languageProvider
+                        .translate(
+                          "ble_disconnected",
+                        ),
+                maxLines: 1,
+                overflow:
+                    TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight:
+                      FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                deviceName,
+                maxLines: 1,
+                overflow:
+                    TextOverflow.ellipsis,
+              ),
+              trailing:
+                  ConstrainedBox(
+                constraints:
+                    const BoxConstraints(
+                  maxWidth: 126,
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: bleProvider
+                          .isConnected
+                      ? TextButton(
+                          onPressed:
+                              recordingProvider
+                                      .hasActiveRecording
+                                  ? null
+                                  : bleProvider
+                                      .disconnect,
+                          child: Text(
+                            languageProvider
+                                .translate(
+                              "disconnect",
+                            ),
+                          ),
+                        )
+                      : FilledButton(
+                          onPressed:
+                              recordingProvider
+                                      .hasActiveRecording
+                                  ? null
+                                  : () {
+                                      _showBleScanDialog(
+                                        context,
+                                      );
+                                    },
+                          child: Text(
+                            languageProvider
+                                .translate(
+                              "ble_search",
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "device_behavior",
+            ),
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.sync_rounded,
+            label: languageProvider.translate(
+              "auto_reconnect",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "auto_reconnect_desc",
+            ),
+            value:
+                bleProvider.autoReconnectEnabled,
+            onChanged:
+                bleProvider
+                    .setAutoReconnectEnabled,
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.filter_alt_outlined,
+            label: languageProvider.translate(
+              "apex_only",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "apex_only_desc",
+            ),
+            value:
+                bleProvider.showOnlyApexDevices,
+            onChanged:
+                bleProvider
+                    .setShowOnlyApexDevices,
           ),
         ],
       ),

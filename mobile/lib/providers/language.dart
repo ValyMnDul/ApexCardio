@@ -174,6 +174,14 @@ class LanguageProvider extends ChangeNotifier {
       "apex_only": "Show only ApexCardio",
       "apex_only_desc": "Hide unrelated Bluetooth devices while scanning.",
 
+      "ui_section": "Interface",
+      "recording_indicator": "Recording indicator",
+      "recording_indicator_desc": "Show the recording dot in the app bar.",
+      "recording_indicator_animation": "Animate recording indicator",
+      "recording_indicator_animation_desc": "Pulse the recording dot while data is being captured.",
+      "compact_recordings": "Compact recording list",
+      "compact_recordings_desc": "Use tighter spacing when many recordings are stored.",
+
     },
     "RO": {
       "live_tab": "Live",
@@ -324,6 +332,14 @@ class LanguageProvider extends ChangeNotifier {
       "auto_reconnect_desc": "Reconectează automat după o pierdere neașteptată a semnalului.",
       "apex_only": "Arată doar ApexCardio",
       "apex_only_desc": "Ascunde alte dispozitive Bluetooth în timpul scanării.",
+
+      "ui_section": "Interfață",
+      "recording_indicator": "Indicator de înregistrare",
+      "recording_indicator_desc": "Arată bulina de înregistrare în bara de sus.",
+      "recording_indicator_animation": "Animează indicatorul",
+      "recording_indicator_animation_desc": "Bulina pulsează cât timp se înregistrează date.",
+      "compact_recordings": "Listă compactă de înregistrări",
+      "compact_recordings_desc": "Folosește spațiere mai mică atunci când ai multe înregistrări.",
 
     },
     "DE": {
@@ -476,6 +492,14 @@ class LanguageProvider extends ChangeNotifier {
       "apex_only": "Nur ApexCardio anzeigen",
       "apex_only_desc": "Andere Bluetooth-Geräte beim Scannen ausblenden.",
 
+      "ui_section": "Oberfläche",
+      "recording_indicator": "Aufnahmeanzeige",
+      "recording_indicator_desc": "Zeigt den Aufnahmepunkt in der oberen Leiste.",
+      "recording_indicator_animation": "Aufnahmeanzeige animieren",
+      "recording_indicator_animation_desc": "Der Punkt pulsiert während der Aufnahme.",
+      "compact_recordings": "Kompakte Aufnahmeliste",
+      "compact_recordings_desc": "Engere Abstände bei vielen gespeicherten Aufnahmen.",
+
     },
     "RU": {
       "live_tab": "Live",
@@ -627,6 +651,14 @@ class LanguageProvider extends ChangeNotifier {
       "apex_only": "Только ApexCardio",
       "apex_only_desc": "Скрывать другие Bluetooth-устройства при поиске.",
 
+      "ui_section": "Интерфейс",
+      "recording_indicator": "Индикатор записи",
+      "recording_indicator_desc": "Показывать точку записи в верхней панели.",
+      "recording_indicator_animation": "Анимация индикатора",
+      "recording_indicator_animation_desc": "Точка пульсирует во время записи данных.",
+      "compact_recordings": "Компактный список записей",
+      "compact_recordings_desc": "Уменьшить интервалы при большом количестве записей.",
+
     },
     "ES": {
       "live_tab": "Live",
@@ -777,6 +809,14 @@ class LanguageProvider extends ChangeNotifier {
       "auto_reconnect_desc": "Reconectar automáticamente tras una pérdida inesperada de señal.",
       "apex_only": "Mostrar solo ApexCardio",
       "apex_only_desc": "Ocultar otros dispositivos Bluetooth durante la búsqueda.",
+
+      "ui_section": "Interfaz",
+      "recording_indicator": "Indicador de grabación",
+      "recording_indicator_desc": "Mostrar el punto de grabación en la barra superior.",
+      "recording_indicator_animation": "Animar indicador de grabación",
+      "recording_indicator_animation_desc": "El punto pulsa mientras se capturan datos.",
+      "compact_recordings": "Lista compacta de grabaciones",
+      "compact_recordings_desc": "Usar menos espacio cuando hay muchas grabaciones.",
 
     },
   };

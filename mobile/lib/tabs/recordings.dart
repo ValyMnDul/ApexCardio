@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/recording.dart';
 import '../providers/language.dart';
+import '../providers/ui_preferences.dart';
 import '../screens/recording_viewer.dart';
 import '../services/recording_database.dart';
 import '../services/recording_import_service.dart';
@@ -214,35 +215,29 @@ class _RecordingsState extends State<Recordings> {
                           const SizedBox(
                             height: 14,
                           ),
-                          SizedBox(
-                            height: 94,
-                            child: TextField(
-                              controller:
-                                  notesController,
-                              expands: true,
-                              minLines: null,
-                              maxLines: null,
-                              textAlignVertical:
-                                  TextAlignVertical
-                                      .top,
-                              textInputAction:
-                                  TextInputAction
-                                      .newline,
-                              decoration:
-                                  InputDecoration(
-                                labelText:
-                                    language
-                                        .translate(
-                                  "notes",
-                                ),
-                                hintText:
-                                    language
-                                        .translate(
-                                  "optional",
-                                ),
-                                alignLabelWithHint:
-                                    true,
+                          TextField(
+                            controller:
+                                notesController,
+                            minLines: 2,
+                            maxLines: 5,
+                            maxLength: 500,
+                            textInputAction:
+                                TextInputAction
+                                    .newline,
+                            decoration:
+                                InputDecoration(
+                              labelText:
+                                  language
+                                      .translate(
+                                "notes",
                               ),
+                              hintText:
+                                  language
+                                      .translate(
+                                "optional",
+                              ),
+                              alignLabelWithHint:
+                                  true,
                             ),
                           ),
                         ],
@@ -674,13 +669,6 @@ class _RecordingsState extends State<Recordings> {
                       420.0,
                     )
                     .toDouble(),
-            height:
-                (media.size.height - 80)
-                    .clamp(
-                      300.0,
-                      390.0,
-                    )
-                    .toDouble(),
             child: Padding(
               padding:
                   const EdgeInsets.fromLTRB(
@@ -730,29 +718,27 @@ class _RecordingsState extends State<Recordings> {
                   const SizedBox(
                     height: 14,
                   ),
-                  Expanded(
-                    child: TextField(
-                      controller:
-                          notesController,
-                      expands: true,
-                      minLines: null,
-                      maxLines: null,
-                      textAlignVertical:
-                          TextAlignVertical
-                              .top,
-                      decoration:
-                          InputDecoration(
-                        labelText:
-                            language.translate(
-                          "notes",
-                        ),
-                        hintText:
-                            language.translate(
-                          "optional",
-                        ),
-                        alignLabelWithHint:
-                            true,
+                  TextField(
+                    controller:
+                        notesController,
+                    minLines: 2,
+                    maxLines: 6,
+                    maxLength: 500,
+                    textInputAction:
+                        TextInputAction
+                            .newline,
+                    decoration:
+                        InputDecoration(
+                      labelText:
+                          language.translate(
+                        "notes",
                       ),
+                      hintText:
+                          language.translate(
+                        "optional",
+                      ),
+                      alignLabelWithHint:
+                          true,
                     ),
                   ),
                   const SizedBox(
@@ -1610,6 +1596,8 @@ class _RecordingTileState
         Theme.of(context).colorScheme;
     final language =
         context.watch<LanguageProvider>();
+    final uiPreferences =
+        context.watch<UiPreferencesProvider>();
 
     final row = widget.row;
 
@@ -1670,17 +1658,24 @@ class _RecordingTileState
               onTap: widget.onTap,
               child: Padding(
                 padding:
-                    const EdgeInsets.fromLTRB(
+                    EdgeInsets.fromLTRB(
                   14,
-                  13,
+                  uiPreferences.compactRecordingList
+                      ? 9
+                      : 13,
                   4,
-                  13,
+                  uiPreferences.compactRecordingList
+                      ? 9
+                      : 13,
                 ),
                 child: Row(
                   children: [
                     Container(
                       width: 7,
-                      height: 38,
+                      height:
+                          uiPreferences.compactRecordingList
+                              ? 30
+                              : 38,
                       decoration:
                           BoxDecoration(
                         borderRadius:
@@ -1722,8 +1717,11 @@ class _RecordingTileState
                                               .w600,
                                     ),
                           ),
-                          const SizedBox(
-                            height: 4,
+                          SizedBox(
+                            height:
+                                uiPreferences.compactRecordingList
+                                    ? 2
+                                    : 4,
                           ),
                           Text(
                             widget
@@ -1746,8 +1744,11 @@ class _RecordingTileState
                                               .onSurfaceVariant,
                                     ),
                           ),
-                          const SizedBox(
-                            height: 5,
+                          SizedBox(
+                            height:
+                                uiPreferences.compactRecordingList
+                                    ? 3
+                                    : 5,
                           ),
                           Text(
                             '${widget.formatDuration(timelineUs)}  ·  '

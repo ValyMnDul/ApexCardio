@@ -12,6 +12,7 @@ import 'themes/dark.dart';
 import 'providers/theme.dart';
 import 'providers/language.dart';
 import 'providers/font.dart';
+import 'providers/ui_preferences.dart';
 
 import 'tabs/live.dart';
 import 'tabs/recordings.dart';
@@ -32,6 +33,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => LanguageProvider()),
         ChangeNotifierProvider(create: (_) => FontScaleProvider()),
+        ChangeNotifierProvider(create: (_) => UiPreferencesProvider()),
         ChangeNotifierProvider(create: (_) => BleProvider()),
         ChangeNotifierProvider(create: (_) => LiveEcgProvider()),
         ChangeNotifierProvider(
@@ -109,6 +111,8 @@ class _HomeState extends State<Home>
         context.watch<ThemeProvider>();
     final recording =
         context.watch<RecordingProvider>();
+    final uiPreferences =
+        context.watch<UiPreferencesProvider>();
 
     final scheme =
         Theme.of(context).colorScheme;
@@ -157,7 +161,8 @@ class _HomeState extends State<Home>
                   ],
                 ),
               ),
-              if (recording.hasActiveRecording) ...[
+              if (recording.hasActiveRecording &&
+                  uiPreferences.showRecordingIndicator) ...[
                 const SizedBox(width: 10),
                 _RecordingHeaderPulse(
                   active:
@@ -167,6 +172,8 @@ class _HomeState extends State<Home>
                   paused:
                       recording.isPaused ||
                       !recording.bleConnected,
+                  animate:
+                      uiPreferences.animateRecordingIndicator,
                 ),
               ],
             ],
@@ -271,10 +278,12 @@ class _ResponsiveTab extends StatelessWidget {
 class _RecordingHeaderPulse extends StatefulWidget {
   final bool active;
   final bool paused;
+  final bool animate;
 
   const _RecordingHeaderPulse({
     required this.active,
     required this.paused,
+    required this.animate,
   });
 
   @override
@@ -329,13 +338,15 @@ class _RecordingHeaderPulseState
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.active != widget.active ||
-        oldWidget.paused != widget.paused) {
+        oldWidget.paused != widget.paused ||
+        oldWidget.animate != widget.animate) {
       _syncAnimation();
     }
   }
 
   void _syncAnimation() {
-    if (widget.active) {
+    if (widget.active &&
+        widget.animate) {
       _controller.repeat(reverse: true);
     } else {
       _controller
@@ -363,10 +374,14 @@ class _RecordingHeaderPulseState
       builder: (context, child) {
         return Opacity(
           opacity:
-              widget.active ? _opacity.value : 1,
+              widget.active && widget.animate
+                  ? _opacity.value
+                  : 1,
           child: Transform.scale(
             scale:
-                widget.active ? _scale.value : 1,
+                widget.active && widget.animate
+                    ? _scale.value
+                    : 1,
             child: child,
           ),
         );

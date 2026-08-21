@@ -72,7 +72,8 @@ class BleProvider extends ChangeNotifier {
   Future<bool>? _activationFuture;
   bool _autoReconnectArmed = false;
   bool _autoReconnectEnabled = true;
-  bool _showOnlyApexDevices = true;
+  bool _showOnlyApexDevices = false;
+  DateTime? _lastManualDisconnectAt;
   bool _restorationRunning = false;
   bool _disposed = false;
 
@@ -308,9 +309,9 @@ class BleProvider extends ChangeNotifier {
 
       _showOnlyApexDevices =
           prefs.getBool(
-            'ble_apex_only',
+            'ble_apex_only_v2',
           ) ??
-          true;
+          false;
 
       if (!_disposed) {
         notifyListeners();
@@ -364,7 +365,7 @@ class BleProvider extends ChangeNotifier {
           await SharedPreferences.getInstance();
 
       await prefs.setBool(
-        'ble_apex_only',
+        'ble_apex_only_v2',
         value,
       );
     } catch (_) {}
@@ -373,20 +374,29 @@ class BleProvider extends ChangeNotifier {
   List<ScanResult> _filterScanResults(
     List<ScanResult> results,
   ) {
+    if (!_showOnlyApexDevices) {
+      return List<ScanResult>.from(
+        results,
+        growable: false,
+      );
+    }
+
     return results.where((result) {
       final name =
-          result.device.platformName.trim();
+          result.device.platformName
+              .trim()
+              .toLowerCase();
 
       if (name.isEmpty) {
-        return false;
-      }
-
-      if (!_showOnlyApexDevices) {
         return true;
       }
 
-      return name.toLowerCase() ==
-          'apexcardio';
+      return name.contains(
+        'apexcardio',
+      ) ||
+      name.contains(
+        'apex cardio',
+      );
     }).toList(
       growable: false,
     );
@@ -409,11 +419,41 @@ class BleProvider extends ChangeNotifier {
       }
     }
 
+    await stopScan();
+
+    final lastDisconnect =
+        _lastManualDisconnectAt;
+
+    if (lastDisconnect != null) {
+      final elapsed =
+          DateTime.now().difference(
+        lastDisconnect,
+      );
+
+      if (elapsed <
+          const Duration(
+            milliseconds: 650,
+          )) {
+        await Future<void>.delayed(
+          const Duration(
+            milliseconds: 650,
+          ) -
+              elapsed,
+        );
+      }
+    }
+
+    _latestScanResults = [];
     _scanResults.clear();
 
     notifyListeners();
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+    await FlutterBluePlus.startScan(
+      timeout:
+          const Duration(
+        seconds: 8,
+      ),
+    );
   }
 
   Future<void> stopScan() async {
@@ -447,17 +487,54 @@ class BleProvider extends ChangeNotifier {
         device,
       );
 
-      if (!device.isConnected) {
-        await device.connect(
-          autoConnect: false,
-          license: License.nonprofit,
+      final lastDisconnect =
+          _lastManualDisconnectAt;
+
+      if (lastDisconnect != null) {
+        final elapsed =
+            DateTime.now().difference(
+          lastDisconnect,
         );
+
+        if (elapsed <
+            const Duration(
+              milliseconds: 750,
+            )) {
+          await Future<void>.delayed(
+            const Duration(
+              milliseconds: 750,
+            ) -
+                elapsed,
+          );
+        }
+      }
+
+      if (!device.isConnected) {
+        try {
+          await device.connect(
+            autoConnect: false,
+            license: License.nonprofit,
+          );
+        } catch (_) {
+          if (!device.isConnected) {
+            await Future<void>.delayed(
+              const Duration(
+                milliseconds: 450,
+              ),
+            );
+
+            await device.connect(
+              autoConnect: false,
+              license: License.nonprofit,
+            );
+          }
+        }
       }
 
       if (!device.isConnected) {
         await Future<void>.delayed(
           const Duration(
-            milliseconds: 120,
+            milliseconds: 180,
           ),
         );
       }
@@ -493,6 +570,8 @@ class BleProvider extends ChangeNotifier {
 
   Future<void> disconnect() async {
     _manualDisconnect = true;
+    _lastManualDisconnectAt =
+        DateTime.now();
     _reconnectRetryTimer?.cancel();
     _autoReconnectArmed = false;
 
