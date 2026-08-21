@@ -113,12 +113,22 @@ class _RecordingsState extends State<Recordings> {
       return;
     }
 
+    if (!recording.bleConnected) {
+      _showMessage(
+        context
+            .read<LanguageProvider>()
+            .translate(
+              "device_required_recording",
+            ),
+      );
+      return;
+    }
+
     final nameController = TextEditingController(
       text: _defaultRecordingName(),
     );
 
     final notesController = TextEditingController();
-    final additionalController = TextEditingController();
 
     final language =
         context.read<LanguageProvider>();
@@ -134,7 +144,7 @@ class _RecordingsState extends State<Recordings> {
                 .toDouble();
         final height =
             (media.size.height - 80)
-                .clamp(340.0, 510.0)
+                .clamp(330.0, 420.0)
                 .toDouble();
 
         return Dialog(
@@ -234,40 +244,6 @@ class _RecordingsState extends State<Recordings> {
                               ),
                             ),
                           ),
-                          const SizedBox(
-                            height: 14,
-                          ),
-                          SizedBox(
-                            height: 94,
-                            child: TextField(
-                              controller:
-                                  additionalController,
-                              expands: true,
-                              minLines: null,
-                              maxLines: null,
-                              textAlignVertical:
-                                  TextAlignVertical
-                                      .top,
-                              textInputAction:
-                                  TextInputAction
-                                      .newline,
-                              decoration:
-                                  InputDecoration(
-                                labelText:
-                                    language
-                                        .translate(
-                                  "additional_information",
-                                ),
-                                hintText:
-                                    language
-                                        .translate(
-                                  "optional",
-                                ),
-                                alignLabelWithHint:
-                                    true,
-                              ),
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -307,9 +283,6 @@ class _RecordingsState extends State<Recordings> {
                                 notes:
                                     notesController
                                         .text,
-                                additionalInformation:
-                                    additionalController
-                                        .text,
                               ),
                             );
                           },
@@ -337,7 +310,6 @@ class _RecordingsState extends State<Recordings> {
 
     nameController.dispose();
     notesController.dispose();
-    additionalController.dispose();
 
     if (result == null || !mounted) {
       return;
@@ -347,12 +319,6 @@ class _RecordingsState extends State<Recordings> {
       await recording.startRecording(
         name: result.name,
         notes: result.notes,
-        additionalData: result.additionalInformation.trim().isEmpty
-            ? null
-            : <String, Object?>{
-                'additional_information':
-                    result.additionalInformation.trim(),
-              },
       );
 
       if (!mounted) {
@@ -833,9 +799,12 @@ class _RecordingsState extends State<Recordings> {
       children: [
         Expanded(
           child: FilledButton.icon(
-            onPressed: recording.isIdle && !busy
-                ? _showCreateRecordingDialog
-                : null,
+            onPressed:
+                recording.isIdle &&
+                        !busy &&
+                        recording.bleConnected
+                    ? _showCreateRecordingDialog
+                    : null,
             icon: recording.isStarting
                 ? const SizedBox(
                     width: 18,
@@ -1247,7 +1216,11 @@ class _RecordingsState extends State<Recordings> {
         SliverFillRemaining(
           hasScrollBody: false,
           child: _EmptyRecordingsView(
-            onCreate: recording.isIdle ? _showCreateRecordingDialog : null,
+            onCreate:
+                recording.isIdle &&
+                        recording.bleConnected
+                    ? _showCreateRecordingDialog
+                    : null,
           ),
         ),
       ];
@@ -1291,12 +1264,10 @@ class _RecordingsState extends State<Recordings> {
 class _CreateRecordingData {
   final String name;
   final String notes;
-  final String additionalInformation;
 
   const _CreateRecordingData({
     required this.name,
     required this.notes,
-    required this.additionalInformation,
   });
 }
 

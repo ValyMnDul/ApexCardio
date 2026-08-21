@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -20,7 +19,11 @@ enum RecordingSessionState {
   error,
 }
 
-enum RecordingGapReason { paused, bluetoothDisconnected, processRestart }
+enum RecordingGapReason {
+  paused,
+  bluetoothDisconnected,
+  processRestart,
+}
 
 extension RecordingGapReasonValue on RecordingGapReason {
   String get databaseValue {
@@ -128,11 +131,11 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     RecordingDatabase? database,
     RecordingBackgroundService? backgroundService,
     RecordingLiveActivityService? liveActivityService,
-  }) : _database = database ?? RecordingDatabase.instance,
-       _backgroundService =
-           backgroundService ?? RecordingBackgroundService.instance,
-       _liveActivityService =
-           liveActivityService ?? RecordingLiveActivityService.instance {
+  })  : _database = database ?? RecordingDatabase.instance,
+        _backgroundService =
+            backgroundService ?? RecordingBackgroundService.instance,
+        _liveActivityService =
+            liveActivityService ?? RecordingLiveActivityService.instance {
     _bleConnected = _ble.isConnected;
 
     _sampleSubscription = _ble.sampleBatches.listen(_onSampleBatch);
@@ -173,7 +176,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     return _safeTimelinePositionUs();
   }
 
-  Duration get timelineDuration => Duration(microseconds: timelineElapsedUs);
+  Duration get timelineDuration => Duration(
+        microseconds: timelineElapsedUs,
+      );
 
   double get measuredDurationSeconds =>
       _receivedSampleCount / BleProvider.sampleRate;
@@ -224,8 +229,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     final notes = row['notes'] as String?;
     final startedAtMs = row['started_at_ms'] as int;
     final status = row['status'] as String? ?? 'recording';
-    final persistedTimelineUs = row['timeline_duration_us'] as int? ?? 0;
-    final recordedSampleCount = row['recorded_sample_count'] as int? ?? 0;
+    final persistedTimelineUs =
+        row['timeline_duration_us'] as int? ?? 0;
+    final recordedSampleCount =
+        row['recorded_sample_count'] as int? ?? 0;
     final lastCommittedElapsedUs =
         row['last_committed_elapsed_us'] as int? ?? 0;
     final lastHeartbeatAtMs =
@@ -233,12 +240,17 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
 
-    final missingWallTimeUs =
-        math.max(0, nowMs - lastHeartbeatAtMs) *
+    final missingWallTimeUs = math.max(
+      0,
+      nowMs - lastHeartbeatAtMs,
+    ) *
         Duration.microsecondsPerMillisecond;
 
     final recoveredTimelineUs = math.max(
-      math.max(persistedTimelineUs + missingWallTimeUs, persistedTimelineUs),
+      math.max(
+        persistedTimelineUs + missingWallTimeUs,
+        persistedTimelineUs,
+      ),
       lastCommittedElapsedUs,
     );
 
@@ -278,7 +290,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     _recordingId = id;
     _recordingName = name;
     _notes = notes;
-    _startedAt = DateTime.fromMillisecondsSinceEpoch(startedAtMs);
+    _startedAt = DateTime.fromMillisecondsSinceEpoch(
+      startedAtMs,
+    );
 
     _chunkIndex = maxChunkIndex + 1;
     _chunkStartElapsedUs = null;
@@ -305,7 +319,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       final openGap = openGapRows.first;
 
       _activeGapId = openGap['id'] as int;
-      _activeGapReason = _gapReasonFromDatabase(openGap['reason'] as String?);
+      _activeGapReason = _gapReasonFromDatabase(
+        openGap['reason'] as String?,
+      );
     }
 
     if (status == 'paused') {
@@ -313,19 +329,26 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       if (_activeGapReason != RecordingGapReason.paused) {
         if (_activeGapId != null) {
-          await _closeActiveGap(recoveredTimelineUs);
+          await _closeActiveGap(
+            recoveredTimelineUs,
+          );
         }
 
         await _openGap(
           RecordingGapReason.paused,
-          math.max(persistedTimelineUs, lastCommittedElapsedUs),
+          math.max(
+            persistedTimelineUs,
+            lastCommittedElapsedUs,
+          ),
         );
       }
     } else {
       _state = RecordingSessionState.recording;
 
       if (_activeGapReason == RecordingGapReason.paused) {
-        await _closeActiveGap(recoveredTimelineUs);
+        await _closeActiveGap(
+          recoveredTimelineUs,
+        );
       }
 
       if (_activeGapId == null &&
@@ -336,10 +359,14 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
       }
 
-      if (_bleConnected && _activeGapReason != RecordingGapReason.paused) {
-        await _closeActiveGap(recoveredTimelineUs);
+      if (_bleConnected &&
+          _activeGapReason != RecordingGapReason.paused) {
+        await _closeActiveGap(
+          recoveredTimelineUs,
+        );
 
-        _nextSampleElapsedUs = recoveredTimelineUs;
+        _nextSampleElapsedUs =
+            recoveredTimelineUs;
       }
     }
 
@@ -376,8 +403,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     await db.transaction((txn) async {
       for (final row in rows) {
         final id = row['id'] as int;
-        final timelineUs = row['timeline_duration_us'] as int? ?? 0;
-        final heartbeatMs = row['last_heartbeat_at_ms'] as int? ?? now;
+        final timelineUs =
+            row['timeline_duration_us'] as int? ?? 0;
+        final heartbeatMs =
+            row['last_heartbeat_at_ms'] as int? ?? now;
 
         await txn.rawUpdate(
           '''
@@ -386,7 +415,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
           WHERE recording_id = ?
             AND end_elapsed_us IS NULL
           ''',
-          <Object?>[timelineUs, id],
+          <Object?>[
+            timelineUs,
+            id,
+          ],
         );
 
         await txn.update(
@@ -403,7 +435,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  RecordingGapReason _gapReasonFromDatabase(String? value) {
+  RecordingGapReason _gapReasonFromDatabase(
+    String? value,
+  ) {
     switch (value) {
       case 'paused':
         return RecordingGapReason.paused;
@@ -424,22 +458,25 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (!_initialized) {
-      throw StateError(
-        _lastError ?? 'Recording database initialization failed.',
-      );
+      throw StateError(_lastError ?? 'Recording database initialization failed.');
     }
   }
 
   Future<void> startRecording({
     required String name,
     String? notes,
-    Map<String, Object?>? additionalData,
   }) {
     return _serializeControl(() async {
       await ensureInitialized();
 
       if (_state != RecordingSessionState.idle) {
         return;
+      }
+
+      if (!_bleConnected) {
+        throw StateError(
+          'ApexCardio device is not connected.',
+        );
       }
 
       _state = RecordingSessionState.starting;
@@ -456,16 +493,12 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
             ? _defaultRecordingName(now)
             : name.trim();
         final cleanedNotes = notes?.trim();
-        final metadataJson = additionalData == null || additionalData.isEmpty
-            ? null
-            : jsonEncode(additionalData);
-
         final id = await _database.createRecording(
           name: cleanedName,
           notes: cleanedNotes == null || cleanedNotes.isEmpty
               ? null
               : cleanedNotes,
-          metadataJson: metadataJson,
+          metadataJson: null,
           startedAtMs: now.millisecondsSinceEpoch,
           sampleRate: BleProvider.sampleRate,
           deviceName: _ble.deviceName,
@@ -500,7 +533,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         _startHeartbeat();
 
         if (!_bleConnected) {
-          await _openGap(RecordingGapReason.bluetoothDisconnected, 0);
+          await _openGap(
+            RecordingGapReason.bluetoothDisconnected,
+            0,
+          );
         }
 
         await _backgroundService.start(
@@ -520,7 +556,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         if (createdRecordingId != null) {
           try {
-            await _database.deleteRecording(createdRecordingId);
+            await _database.deleteRecording(
+              createdRecordingId,
+            );
           } catch (_) {}
         }
 
@@ -567,7 +605,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         status: 'paused',
       );
 
-      await _openGap(RecordingGapReason.paused, position);
+      await _openGap(
+        RecordingGapReason.paused,
+        position,
+      );
 
       _nextSampleElapsedUs = null;
 
@@ -596,7 +637,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       _nextSampleElapsedUs = position;
 
       if (!_bleConnected) {
-        await _openGap(RecordingGapReason.bluetoothDisconnected, position);
+        await _openGap(
+          RecordingGapReason.bluetoothDisconnected,
+          position,
+        );
       }
 
       await _syncExternalRecordingState();
@@ -620,10 +664,14 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       _notify();
 
       try {
-        await _backgroundService.showStopping(recordingName: name);
+        await _backgroundService.showStopping(
+          recordingName: name,
+        );
       } catch (_) {}
 
-      await _syncLiveActivityState(statusOverride: 'Saving');
+      await _syncLiveActivityState(
+        statusOverride: 'Saving',
+      );
 
       _flushChunk();
       final finalPosition = _safeTimelinePositionUs();
@@ -647,7 +695,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _backgroundService.stop();
         } catch (_) {}
 
-        await _endLiveActivity(recordingId: id, finalStatus: 'Saved');
+        await _endLiveActivity(
+          recordingId: id,
+          finalStatus: 'Saved',
+        );
 
         _clearActiveSession();
         _state = RecordingSessionState.idle;
@@ -777,7 +828,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
             lastFailure = error;
 
             if (attempt < maxWriteAttempts) {
-              await Future<void>.delayed(Duration(milliseconds: 150 * attempt));
+              await Future<void>.delayed(
+                Duration(milliseconds: 150 * attempt),
+              );
             }
           }
         }
@@ -861,9 +914,17 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
       final offset = i * bytesPerSample;
       final sample = samples[i];
 
-      data.setInt32(offset, sample.ecg.round(), Endian.little);
+      data.setInt32(
+        offset,
+        sample.ecg.round(),
+        Endian.little,
+      );
 
-      data.setInt32(offset + 4, sample.respiration.round(), Endian.little);
+      data.setInt32(
+        offset + 4,
+        sample.respiration.round(),
+        Endian.little,
+      );
     }
 
     return data.buffer.asUint8List();
@@ -918,7 +979,9 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _syncLiveActivityState({String? statusOverride}) async {
+  Future<void> _syncLiveActivityState({
+    String? statusOverride,
+  }) async {
     final id = _recordingId;
 
     if (id == null) {
@@ -930,7 +993,8 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
         recordingId: id,
         isPaused: _state == RecordingSessionState.paused,
         isConnected: _bleConnected,
-        statusText: statusOverride ?? _liveActivityStatusText(),
+        statusText:
+            statusOverride ?? _liveActivityStatusText(),
       );
 
       if (!updated &&
@@ -1007,7 +1071,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _waitForWrites();
 
     if (_activeGapId == null) {
-      await _openGap(RecordingGapReason.bluetoothDisconnected, position);
+      await _openGap(
+        RecordingGapReason.bluetoothDisconnected,
+        position,
+      );
     }
 
     _nextSampleElapsedUs = null;
@@ -1030,7 +1097,10 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
     _notify();
   }
 
-  Future<void> _openGap(RecordingGapReason reason, int startElapsedUs) async {
+  Future<void> _openGap(
+    RecordingGapReason reason,
+    int startElapsedUs,
+  ) async {
     final recordingId = _recordingId;
 
     if (recordingId == null || _activeGapId != null) {
@@ -1083,9 +1153,12 @@ class RecordingProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
 
-    _heartbeatTimer = Timer.periodic(heartbeatInterval, (_) {
-      unawaited(_persistHeartbeat());
-    });
+    _heartbeatTimer = Timer.periodic(
+      heartbeatInterval,
+      (_) {
+        unawaited(_persistHeartbeat());
+      },
+    );
   }
 
   void _stopHeartbeat() {

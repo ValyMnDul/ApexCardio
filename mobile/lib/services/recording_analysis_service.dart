@@ -23,6 +23,38 @@ class RecordingAnalysisSummary {
   });
 }
 
+class RecordingSignalExcerpt {
+  final int startUs;
+  final int endUs;
+  final List<double> ecg;
+  final List<double> respiration;
+
+  const RecordingSignalExcerpt({
+    required this.startUs,
+    required this.endUs,
+    required this.ecg,
+    required this.respiration,
+  });
+}
+
+class RecordingSignalStats {
+  final int count;
+  final double min;
+  final double max;
+  final double mean;
+  final double rms;
+
+  const RecordingSignalStats({
+    required this.count,
+    required this.min,
+    required this.max,
+    required this.mean,
+    required this.rms,
+  });
+
+  double get range => max - min;
+}
+
 class RecordingAnalysisService {
   static final RecordingAnalysisService instance =
       RecordingAnalysisService._internal();
@@ -168,6 +200,135 @@ class RecordingAnalysisService {
       gapCount: gapCount,
       gapDurationUs: gapDurationUs,
       analyzedWindows: starts.length,
+    );
+  }
+
+  Future<List<RecordingSignalExcerpt>> loadExcerpts({
+    required int recordingId,
+    required int timelineUs,
+    required double sampleRate,
+    int desiredCount = 8,
+    int windowUs = 2500000,
+  }) async {
+    if (timelineUs <= 0 ||
+        sampleRate <= 0 ||
+        desiredCount <= 0) {
+      return const <RecordingSignalExcerpt>[];
+    }
+
+    final safeWindowUs = math.max(
+      1000000,
+      math.min(
+        windowUs,
+        timelineUs,
+      ),
+    );
+
+    final starts = <int>[];
+
+    if (timelineUs <= safeWindowUs) {
+      starts.add(0);
+    } else {
+      final availableStart =
+          timelineUs - safeWindowUs;
+
+      final count = math.max(
+        2,
+        desiredCount,
+      );
+
+      for (int i = 0;
+          i < count;
+          i++) {
+        final start = count == 1
+            ? 0
+            : (availableStart *
+                    i /
+                    (count - 1))
+                .round();
+
+        if (starts.isEmpty ||
+            starts.last != start) {
+          starts.add(start);
+        }
+      }
+    }
+
+    final output =
+        <RecordingSignalExcerpt>[];
+
+    for (final startUs in starts) {
+      final endUs = math.min(
+        timelineUs,
+        startUs + safeWindowUs,
+      );
+
+      final signals = await _loadSignals(
+        recordingId: recordingId,
+        startUs: startUs,
+        endUs: endUs,
+        sampleRate: sampleRate,
+      );
+
+      output.add(
+        RecordingSignalExcerpt(
+          startUs: startUs,
+          endUs: endUs,
+          ecg: signals.ecg,
+          respiration:
+              signals.respiration,
+        ),
+      );
+    }
+
+    return output;
+  }
+
+  RecordingSignalStats calculateStats(
+    Iterable<double> values,
+  ) {
+    var count = 0;
+    var min = double.infinity;
+    var max =
+        double.negativeInfinity;
+    var mean = 0.0;
+    var squareSum = 0.0;
+
+    for (final value in values) {
+      if (!value.isFinite) {
+        continue;
+      }
+
+      count++;
+      min = math.min(min, value);
+      max = math.max(max, value);
+
+      final delta = value - mean;
+      mean += delta / count;
+
+      squareSum +=
+          value * value;
+    }
+
+    if (count == 0) {
+      return const RecordingSignalStats(
+        count: 0,
+        min: 0,
+        max: 0,
+        mean: 0,
+        rms: 0,
+      );
+    }
+
+    return RecordingSignalStats(
+      count: count,
+      min: min,
+      max: max,
+      mean: mean,
+      rms:
+          math.sqrt(
+        squareSum / count,
+      ),
     );
   }
 

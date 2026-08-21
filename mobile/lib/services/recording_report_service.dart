@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -233,22 +234,44 @@ class RecordingReportService {
       languageCode,
     );
 
-    final baseFont =
-        await PdfGoogleFonts.notoSansRegular();
+    final ecgExcerpts =
+        await _analysis.loadExcerpts(
+      recordingId: recordingId,
+      timelineUs: timelineUs,
+      sampleRate: sampleRate,
+      desiredCount: 8,
+      windowUs: 2500000,
+    );
 
-    final boldFont =
-        await PdfGoogleFonts.notoSansBold();
+    final respirationExcerpts =
+        await _analysis.loadExcerpts(
+      recordingId: recordingId,
+      timelineUs: timelineUs,
+      sampleRate: sampleRate,
+      desiredCount: 6,
+      windowUs: 5000000,
+    );
 
-    final theme =
-        pw.ThemeData.withFont(
-      base: baseFont,
-      bold: boldFont,
+    final ecgStats =
+        _analysis.calculateStats(
+      ecgExcerpts.expand(
+        (excerpt) => excerpt.ecg,
+      ),
+    );
+
+    final respirationStats =
+        _analysis.calculateStats(
+      respirationExcerpts.expand(
+        (excerpt) =>
+            excerpt.respiration,
+      ),
     );
 
     final document = pw.Document(
       title: 'ApexCardio Report',
       author: 'ApexCardio',
       creator: 'ApexCardio',
+      compress: true,
     );
 
     final teal =
@@ -271,20 +294,22 @@ class RecordingReportService {
       '#D8DEDD',
     );
 
+    final recordingName =
+        recording['name'] as String? ??
+        language.text(
+          'recording',
+        );
+
     document.addPage(
       pw.Page(
-        pageTheme:
-            pw.PageTheme(
-          theme: theme,
-          pageFormat:
-              PdfPageFormat.a4,
-          margin:
-              const pw.EdgeInsets.fromLTRB(
-            32,
-            28,
-            32,
-            28,
-          ),
+        pageFormat:
+            PdfPageFormat.a4,
+        margin:
+            const pw.EdgeInsets.fromLTRB(
+          32,
+          28,
+          32,
+          28,
         ),
         build: (_) {
           return pw.Column(
@@ -292,48 +317,21 @@ class RecordingReportService {
                 pw.CrossAxisAlignment
                     .stretch,
             children: [
-              pw.Row(
-                children: [
-                  pw.Text(
-                    'APEX CARDIO',
-                    style:
-                        pw.TextStyle(
-                      fontSize: 15,
-                      fontWeight:
-                          pw.FontWeight
-                              .bold,
-                      color: teal,
-                    ),
-                  ),
-                  pw.Spacer(),
-                  pw.Text(
+              _pageHeader(
+                title: 'APEX CARDIO',
+                trailing:
                     language.text(
-                      'report',
-                    ),
-                    style:
-                        pw.TextStyle(
-                      fontSize: 9,
-                      color: muted,
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(
-                height: 8,
-              ),
-              pw.Container(
-                height: 0.8,
-                color: line,
+                  'report',
+                ),
+                teal: teal,
+                muted: muted,
+                line: line,
               ),
               pw.SizedBox(
                 height: 14,
               ),
               pw.Text(
-                recording['name']
-                        as String? ??
-                    language.text(
-                      'recording',
-                    ),
+                recordingName,
                 maxLines: 2,
                 style: pw.TextStyle(
                   fontSize: 22,
@@ -588,21 +586,11 @@ class RecordingReportService {
                 ),
               ],
               pw.Spacer(),
-              pw.Container(
-                height: 0.8,
-                color: line,
-              ),
-              pw.SizedBox(
-                height: 7,
-              ),
-              pw.Text(
-                language.text(
-                  'disclaimer',
-                ),
-                style: pw.TextStyle(
-                  fontSize: 7.7,
-                  color: muted,
-                ),
+              _footer(
+                language:
+                    language,
+                muted: muted,
+                line: line,
               ),
             ],
           );
@@ -610,7 +598,665 @@ class RecordingReportService {
       ),
     );
 
+    document.addPage(
+      _detailedSignalPage(
+        pageTitle:
+            language.text(
+          'ecg_details',
+        ),
+        recordingName:
+            recordingName,
+        startedAtMs:
+            startedAtMs,
+        excerpts:
+            ecgExcerpts,
+        channel:
+            _ReportChannel.ecg,
+        color: red,
+        teal: teal,
+        muted: muted,
+        line: line,
+        language:
+            language,
+        summaryRows: [
+          [
+            language.text(
+              'heart_rate',
+            ),
+            summary.averageHeartRateBpm ==
+                    null
+                ? '--'
+                : '${summary.averageHeartRateBpm!.toStringAsFixed(1)} BPM',
+          ],
+          [
+            language.text(
+              'rr',
+            ),
+            summary.averageRrMs ==
+                    null
+                ? '--'
+                : '${summary.averageRrMs!.toStringAsFixed(0)} ms',
+          ],
+          [
+            language.text(
+              'sample_rate',
+            ),
+            '${sampleRate.toStringAsFixed(0)} Hz',
+          ],
+          [
+            language.text(
+              'signal_range',
+            ),
+            _formatSignalNumber(
+              ecgStats.range,
+            ),
+          ],
+          [
+            language.text(
+              'signal_mean',
+            ),
+            _formatSignalNumber(
+              ecgStats.mean,
+            ),
+          ],
+          [
+            language.text(
+              'signal_rms',
+            ),
+            _formatSignalNumber(
+              ecgStats.rms,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    document.addPage(
+      _detailedSignalPage(
+        pageTitle:
+            language.text(
+          'respiration_details',
+        ),
+        recordingName:
+            recordingName,
+        startedAtMs:
+            startedAtMs,
+        excerpts:
+            respirationExcerpts,
+        channel:
+            _ReportChannel.respiration,
+        color: teal,
+        teal: teal,
+        muted: muted,
+        line: line,
+        language:
+            language,
+        summaryRows: [
+          [
+            language.text(
+              'respiration_rate',
+            ),
+            summary.averageRespirationRateBrpm ==
+                    null
+                ? '--'
+                : '${summary.averageRespirationRateBrpm!.toStringAsFixed(1)} BRPM',
+          ],
+          [
+            language.text(
+              'breath',
+            ),
+            summary.averageBreathIntervalMs ==
+                    null
+                ? '--'
+                : '${summary.averageBreathIntervalMs!.toStringAsFixed(0)} ms',
+          ],
+          [
+            language.text(
+              'sample_rate',
+            ),
+            '${sampleRate.toStringAsFixed(0)} Hz',
+          ],
+          [
+            language.text(
+              'signal_range',
+            ),
+            _formatSignalNumber(
+              respirationStats.range,
+            ),
+          ],
+          [
+            language.text(
+              'signal_mean',
+            ),
+            _formatSignalNumber(
+              respirationStats.mean,
+            ),
+          ],
+          [
+            language.text(
+              'signal_rms',
+            ),
+            _formatSignalNumber(
+              respirationStats.rms,
+            ),
+          ],
+        ],
+      ),
+    );
+
     return document.save();
+  }
+
+  pw.Page _detailedSignalPage({
+    required String pageTitle,
+    required String recordingName,
+    required int startedAtMs,
+    required List<RecordingSignalExcerpt>
+        excerpts,
+    required _ReportChannel channel,
+    required PdfColor color,
+    required PdfColor teal,
+    required PdfColor muted,
+    required PdfColor line,
+    required _ReportLanguage language,
+    required List<List<String>>
+        summaryRows,
+  }) {
+    return pw.Page(
+      pageFormat:
+          PdfPageFormat.a4,
+      margin:
+          const pw.EdgeInsets.fromLTRB(
+        28,
+        24,
+        28,
+        24,
+      ),
+      build: (_) {
+        final widgets =
+            <pw.Widget>[
+          _pageHeader(
+            title: pageTitle,
+            trailing: recordingName,
+            teal: teal,
+            muted: muted,
+            line: line,
+          ),
+          pw.SizedBox(
+            height: 10,
+          ),
+          _compactTable(
+            line: line,
+            muted: muted,
+            rows: summaryRows,
+          ),
+          pw.SizedBox(
+            height: 10,
+          ),
+        ];
+
+        if (excerpts.isEmpty) {
+          widgets.add(
+            pw.Padding(
+              padding:
+                  const pw.EdgeInsets
+                      .symmetric(
+                vertical: 24,
+              ),
+              child: pw.Text(
+                language.text(
+                  'no_signal',
+                ),
+                style: pw.TextStyle(
+                  fontSize: 10,
+                  color: muted,
+                ),
+              ),
+            ),
+          );
+        } else {
+          for (int index = 0;
+              index < excerpts.length;
+              index++) {
+            final excerpt =
+                excerpts[index];
+
+            final values = channel ==
+                    _ReportChannel.ecg
+                ? excerpt.ecg
+                : excerpt.respiration;
+
+            widgets.add(
+              _signalStrip(
+                index: index,
+                excerpt: excerpt,
+                values: values,
+                startedAtMs:
+                    startedAtMs,
+                color: color,
+                muted: muted,
+                line: line,
+                language: language,
+              ),
+            );
+
+            if (index !=
+                excerpts.length - 1) {
+              widgets.add(
+                pw.SizedBox(
+                  height: 5,
+                ),
+              );
+            }
+          }
+        }
+
+        widgets.add(
+          pw.Spacer(),
+        );
+
+        widgets.add(
+          _footer(
+            language:
+                language,
+            muted: muted,
+            line: line,
+          ),
+        );
+
+        return pw.Column(
+          crossAxisAlignment:
+              pw.CrossAxisAlignment
+                  .stretch,
+          children: widgets,
+        );
+      },
+    );
+  }
+
+  pw.Widget _signalStrip({
+    required int index,
+    required RecordingSignalExcerpt
+        excerpt,
+    required List<double> values,
+    required int startedAtMs,
+    required PdfColor color,
+    required PdfColor muted,
+    required PdfColor line,
+    required _ReportLanguage language,
+  }) {
+    final durationSeconds =
+        (excerpt.endUs -
+                excerpt.startUs) /
+            Duration
+                .microsecondsPerSecond;
+
+    return pw.Container(
+      padding:
+          const pw.EdgeInsets.fromLTRB(
+        7,
+        5,
+        7,
+        5,
+      ),
+      decoration:
+          pw.BoxDecoration(
+        border: pw.Border.all(
+          color: line,
+          width: 0.55,
+        ),
+        borderRadius:
+            pw.BorderRadius.circular(
+          5,
+        ),
+      ),
+      child: pw.Column(
+        crossAxisAlignment:
+            pw.CrossAxisAlignment
+                .stretch,
+        children: [
+          pw.Row(
+            children: [
+              pw.Text(
+                '${language.text('excerpt')} ${index + 1}',
+                style:
+                    pw.TextStyle(
+                  fontSize: 7.7,
+                  fontWeight:
+                      pw.FontWeight
+                          .bold,
+                ),
+              ),
+              pw.SizedBox(width: 7),
+              pw.Text(
+                _formatExcerptTimestamp(
+                  startedAtMs,
+                  excerpt.startUs,
+                ),
+                style:
+                    pw.TextStyle(
+                  fontSize: 7.3,
+                  color: muted,
+                ),
+              ),
+              pw.Spacer(),
+              pw.Text(
+                '${durationSeconds.toStringAsFixed(1)} s · ${values.length} ${language.text('samples').toLowerCase()}',
+                style:
+                    pw.TextStyle(
+                  fontSize: 6.9,
+                  color: muted,
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 3),
+          pw.SizedBox(
+            height: 43,
+            child: values.length < 2
+                ? pw.Center(
+                    child: pw.Text(
+                      language.text(
+                        'no_signal',
+                      ),
+                      style:
+                          pw.TextStyle(
+                        fontSize: 7,
+                        color: muted,
+                      ),
+                    ),
+                  )
+                : pw.SvgImage(
+                    svg:
+                        _signalSvg(
+                      values,
+                      color:
+                          _pdfColorHex(
+                        color,
+                      ),
+                    ),
+                    fit:
+                        pw.BoxFit.fill,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _pageHeader({
+    required String title,
+    required String trailing,
+    required PdfColor teal,
+    required PdfColor muted,
+    required PdfColor line,
+  }) {
+    return pw.Column(
+      children: [
+        pw.Row(
+          children: [
+            pw.Text(
+              title,
+              style:
+                  pw.TextStyle(
+                fontSize: 14,
+                fontWeight:
+                    pw.FontWeight.bold,
+                color: teal,
+              ),
+            ),
+            pw.SizedBox(
+              width: 16,
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                trailing,
+                maxLines: 1,
+                textAlign:
+                    pw.TextAlign.right,
+                style:
+                    pw.TextStyle(
+                  fontSize: 8,
+                  color: muted,
+                ),
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 7),
+        pw.Container(
+          height: 0.8,
+          color: line,
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _footer({
+    required _ReportLanguage language,
+    required PdfColor muted,
+    required PdfColor line,
+  }) {
+    return pw.Column(
+      crossAxisAlignment:
+          pw.CrossAxisAlignment
+              .stretch,
+      children: [
+        pw.Container(
+          height: 0.8,
+          color: line,
+        ),
+        pw.SizedBox(
+          height: 7,
+        ),
+        pw.Text(
+          language.text(
+            'disclaimer',
+          ),
+          style: pw.TextStyle(
+            fontSize: 7.2,
+            color: muted,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _signalSvg(
+    List<double> values, {
+    required String color,
+  }) {
+    const width = 1000.0;
+    const height = 110.0;
+
+    final sampled =
+        _downsample(
+      values,
+      420,
+    );
+
+    if (sampled.length < 2) {
+      return '''
+<svg viewBox="0 0 1000 110" xmlns="http://www.w3.org/2000/svg">
+  <line x1="0" y1="55" x2="1000" y2="55" stroke="#D8DEDD" stroke-width="1"/>
+</svg>
+''';
+    }
+
+    final sorted =
+        List<double>.from(
+      sampled,
+    )..sort();
+
+    final lowIndex =
+        ((sorted.length - 1) *
+                0.02)
+            .round();
+
+    final highIndex =
+        ((sorted.length - 1) *
+                0.98)
+            .round();
+
+    var low =
+        sorted[lowIndex];
+    var high =
+        sorted[highIndex];
+
+    if (!low.isFinite ||
+        !high.isFinite ||
+        (high - low).abs() <
+            1e-9) {
+      low =
+          sorted.first;
+      high =
+          sorted.last;
+    }
+
+    if ((high - low).abs() <
+        1e-9) {
+      high = low + 1;
+    }
+
+    final range =
+        high - low;
+
+    final points =
+        StringBuffer();
+
+    for (int i = 0;
+        i < sampled.length;
+        i++) {
+      final x =
+          i /
+              (sampled.length - 1) *
+              width;
+
+      final normalized =
+          ((sampled[i] - low) /
+                  range)
+              .clamp(
+        0.0,
+        1.0,
+      );
+
+      final y =
+          height -
+          8 -
+          normalized *
+              (height - 16);
+
+      if (i > 0) {
+        points.write(' ');
+      }
+
+      points.write(
+        '${x.toStringAsFixed(1)},${y.toStringAsFixed(1)}',
+      );
+    }
+
+    return '''
+<svg viewBox="0 0 1000 110" xmlns="http://www.w3.org/2000/svg">
+  <line x1="0" y1="27.5" x2="1000" y2="27.5" stroke="#EEF1F0" stroke-width="1"/>
+  <line x1="0" y1="55" x2="1000" y2="55" stroke="#D8DEDD" stroke-width="1"/>
+  <line x1="0" y1="82.5" x2="1000" y2="82.5" stroke="#EEF1F0" stroke-width="1"/>
+  <line x1="250" y1="0" x2="250" y2="110" stroke="#F2F4F4" stroke-width="1"/>
+  <line x1="500" y1="0" x2="500" y2="110" stroke="#F2F4F4" stroke-width="1"/>
+  <line x1="750" y1="0" x2="750" y2="110" stroke="#F2F4F4" stroke-width="1"/>
+  <polyline points="${points.toString()}" fill="none" stroke="$color" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+''';
+  }
+
+  List<double> _downsample(
+    List<double> values,
+    int maximumPoints,
+  ) {
+    if (values.length <=
+        maximumPoints) {
+      return values;
+    }
+
+    final output =
+        <double>[];
+
+    final stride =
+        values.length /
+        maximumPoints;
+
+    for (int i = 0;
+        i < maximumPoints;
+        i++) {
+      final start =
+          (i * stride).floor();
+
+      final end = math.min(
+        values.length,
+        ((i + 1) * stride)
+            .ceil(),
+      );
+
+      if (end <= start) {
+        output.add(
+          values[start],
+        );
+        continue;
+      }
+
+      var sum = 0.0;
+      var count = 0;
+
+      for (int j = start;
+          j < end;
+          j++) {
+        final value =
+            values[j];
+
+        if (!value.isFinite) {
+          continue;
+        }
+
+        sum += value;
+        count++;
+      }
+
+      output.add(
+        count == 0
+            ? 0
+            : sum / count,
+      );
+    }
+
+    return output;
+  }
+
+  String _pdfColorHex(
+    PdfColor color,
+  ) {
+    final r =
+        (color.red * 255)
+            .round()
+            .clamp(0, 255)
+            .toInt();
+    final g =
+        (color.green * 255)
+            .round()
+            .clamp(0, 255)
+            .toInt();
+    final b =
+        (color.blue * 255)
+            .round()
+            .clamp(0, 255)
+            .toInt();
+
+    String two(
+      int value,
+    ) =>
+        value
+            .toRadixString(16)
+            .padLeft(2, '0');
+
+    return '#${two(r)}${two(g)}${two(b)}';
   }
 
   pw.Widget _vital({
@@ -834,6 +1480,11 @@ class RecordingReportService {
   }
 }
 
+enum _ReportChannel {
+  ecg,
+  respiration,
+}
+
 class _ReportLanguage {
   final String code;
 
@@ -867,6 +1518,15 @@ class _ReportLanguage {
       'paused': 'Paused',
       'interrupted': 'Interrupted',
       'completed': 'Completed',
+      'ecg_details': 'Detailed ECG',
+      'respiration_details': 'Detailed Respiration',
+      'heart_rate': 'Average heart rate',
+      'respiration_rate': 'Average respiration rate',
+      'signal_range': 'Signal range',
+      'signal_mean': 'Signal mean',
+      'signal_rms': 'Signal RMS',
+      'excerpt': 'Excerpt',
+      'no_signal': 'No signal samples in this interval',
       'disclaimer':
           'Heart-rate and respiration-rate values are derived from the recorded signal for review and do not constitute a medical diagnosis.',
     },
@@ -893,6 +1553,15 @@ class _ReportLanguage {
       'paused': 'Pauză',
       'interrupted': 'Întreruptă',
       'completed': 'Finalizată',
+      'ecg_details': 'ECG detaliat',
+      'respiration_details': 'Respirație detaliată',
+      'heart_rate': 'Ritm cardiac mediu',
+      'respiration_rate': 'Ritm respirator mediu',
+      'signal_range': 'Amplitudine semnal',
+      'signal_mean': 'Media semnalului',
+      'signal_rms': 'RMS semnal',
+      'excerpt': 'Secvență',
+      'no_signal': 'Nu există mostre în acest interval',
       'disclaimer':
           'Valorile ritmului cardiac și respirator sunt derivate din semnalul înregistrat pentru analiză și nu reprezintă un diagnostic medical.',
     },
@@ -919,34 +1588,52 @@ class _ReportLanguage {
       'paused': 'Pausiert',
       'interrupted': 'Unterbrochen',
       'completed': 'Abgeschlossen',
+      'ecg_details': 'Detailliertes EKG',
+      'respiration_details': 'Detaillierte Atmung',
+      'heart_rate': 'Durchschnittliche Herzfrequenz',
+      'respiration_rate': 'Durchschnittliche Atemfrequenz',
+      'signal_range': 'Signalbereich',
+      'signal_mean': 'Signalmittelwert',
+      'signal_rms': 'Signal-RMS',
+      'excerpt': 'Ausschnitt',
+      'no_signal': 'Keine Signalwerte in diesem Intervall',
       'disclaimer':
           'Herz- und Atemfrequenz werden aus dem aufgezeichneten Signal zur Überprüfung abgeleitet und stellen keine medizinische Diagnose dar.',
     },
     'RU': {
-      'report': 'Отчёт о записи',
-      'average': 'Среднее',
-      'recording': 'Запись',
-      'status': 'Статус',
-      'started': 'Начало',
-      'ended': 'Конец',
-      'timeline': 'Шкала времени',
-      'measured': 'Измеренный сигнал',
-      'sample_rate': 'Частота дискретизации',
-      'samples': 'Сэмплы',
-      'device': 'Устройство',
-      'signal': 'Сводка сигнала',
-      'rr': 'Интервал R-R',
-      'breath': 'Интервал дыхания',
-      'gaps': 'Разрывы сигнала',
-      'gap_duration': 'Длительность разрывов',
-      'analysis_windows': 'Окна анализа',
-      'notes': 'Заметки',
-      'recording_active': 'Запись',
-      'paused': 'Пауза',
-      'interrupted': 'Прервано',
-      'completed': 'Завершено',
+      'report': 'Recording report',
+      'average': 'Average',
+      'recording': 'Recording',
+      'status': 'Status',
+      'started': 'Started',
+      'ended': 'Ended',
+      'timeline': 'Timeline',
+      'measured': 'Measured signal',
+      'sample_rate': 'Sample rate',
+      'samples': 'Samples',
+      'device': 'Device',
+      'signal': 'Signal summary',
+      'rr': 'R-R interval',
+      'breath': 'Breath interval',
+      'gaps': 'Signal gaps',
+      'gap_duration': 'Gap duration',
+      'analysis_windows': 'Analysis windows',
+      'notes': 'Notes',
+      'recording_active': 'Recording',
+      'paused': 'Paused',
+      'interrupted': 'Interrupted',
+      'completed': 'Completed',
+      'ecg_details': 'Detailed ECG',
+      'respiration_details': 'Detailed Respiration',
+      'heart_rate': 'Average heart rate',
+      'respiration_rate': 'Average respiration rate',
+      'signal_range': 'Signal range',
+      'signal_mean': 'Signal mean',
+      'signal_rms': 'Signal RMS',
+      'excerpt': 'Excerpt',
+      'no_signal': 'No signal samples in this interval',
       'disclaimer':
-          'Частота сердцебиения и дыхания рассчитывается по записанному сигналу для просмотра и не является медицинским диагнозом.',
+          'Heart-rate and respiration-rate values are derived from the recorded signal for review and do not constitute a medical diagnosis.',
     },
     'ES': {
       'report': 'Informe de grabación',
@@ -971,6 +1658,15 @@ class _ReportLanguage {
       'paused': 'Pausada',
       'interrupted': 'Interrumpida',
       'completed': 'Completada',
+      'ecg_details': 'ECG detallado',
+      'respiration_details': 'Respiración detallada',
+      'heart_rate': 'Frecuencia cardíaca promedio',
+      'respiration_rate': 'Respiración promedio',
+      'signal_range': 'Rango de señal',
+      'signal_mean': 'Media de señal',
+      'signal_rms': 'RMS de señal',
+      'excerpt': 'Fragmento',
+      'no_signal': 'No hay muestras en este intervalo',
       'disclaimer':
           'La frecuencia cardíaca y respiratoria se deriva de la señal grabada para revisión y no constituye un diagnóstico médico.',
     },
@@ -1033,6 +1729,26 @@ String _formatDateTime(
       '${_two(date.minute)}';
 }
 
+String _formatExcerptTimestamp(
+  int startedAtMs,
+  int elapsedUs,
+) {
+  final date =
+      DateTime.fromMillisecondsSinceEpoch(
+    startedAtMs,
+  ).add(
+    Duration(
+      microseconds: elapsedUs,
+    ),
+  );
+
+  return '${_two(date.month)}-'
+      '${_two(date.day)} '
+      '${_two(date.hour)}:'
+      '${_two(date.minute)}:'
+      '${_two(date.second)}';
+}
+
 String _formatNumber(
   int value,
 ) {
@@ -1057,6 +1773,43 @@ String _formatNumber(
   }
 
   return buffer.toString();
+}
+
+String _formatSignalNumber(
+  double value,
+) {
+  if (!value.isFinite) {
+    return '--';
+  }
+
+  final absolute =
+      value.abs();
+
+  if (absolute >= 1000000) {
+    return value
+        .toStringAsExponential(
+          3,
+        );
+  }
+
+  if (absolute >= 1000) {
+    return value
+        .toStringAsFixed(
+          0,
+        );
+  }
+
+  if (absolute >= 10) {
+    return value
+        .toStringAsFixed(
+          1,
+        );
+  }
+
+  return value
+      .toStringAsFixed(
+        3,
+      );
 }
 
 String _two(

@@ -6,6 +6,7 @@ import '../providers/language.dart';
 import '../providers/font.dart';
 import '../providers/ble.dart';
 import '../providers/live_ecg.dart';
+import '../providers/recording.dart';
 
 class Settings extends StatefulWidget {
   const Settings({super.key});
@@ -19,6 +20,28 @@ class _SettingsState extends State<Settings> {
   void _showBleScanDialog(
     BuildContext context,
   ) {
+    final recording =
+        context.read<RecordingProvider>();
+
+    if (recording.hasActiveRecording) {
+      final language =
+          context.read<LanguageProvider>();
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              language.translate(
+                "stop_recording_to_connect",
+              ),
+            ),
+          ),
+        );
+
+      return;
+    }
+
     final bleProvider =
         context.read<BleProvider>();
 
@@ -310,6 +333,8 @@ class _SettingsState extends State<Settings> {
         context.watch<BleProvider>();
     final liveEcgProvider =
         context.watch<LiveEcgProvider>();
+    final recordingProvider =
+        context.watch<RecordingProvider>();
     final scheme =
         Theme.of(context).colorScheme;
 
@@ -399,11 +424,15 @@ class _SettingsState extends State<Settings> {
                           ),
                         )
                       : FilledButton(
-                          onPressed: () {
-                            _showBleScanDialog(
-                              context,
-                            );
-                          },
+                          onPressed:
+                              recordingProvider
+                                      .hasActiveRecording
+                                  ? null
+                                  : () {
+                                      _showBleScanDialog(
+                                        context,
+                                      );
+                                    },
                           child: Text(
                             languageProvider
                                 .translate(

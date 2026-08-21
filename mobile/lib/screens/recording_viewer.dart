@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -57,7 +58,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
   int _gestureAnchorTimeUs = 0;
 
   static const int _minimumWindowUs = 2 * 1000000;
-  static const int _maximumDetailedWindowUs = 10 * 60 * 1000000;
+  static const int _maximumDetailedWindowUs = 20 * 1000000;
 
   @override
   void initState() {
@@ -550,7 +551,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
     ).round().clamp(
           _minimumWindowUs,
           maxWindow,
-        );
+        ).toInt();
 
     final currentFocalX =
         details.localFocalPoint.dx.clamp(
@@ -596,7 +597,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
     return startUs.clamp(
       0,
       maximumStart,
-    );
+    ).toInt();
   }
 
   void _zoomBy(double factor) {
@@ -620,7 +621,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
     ).round().clamp(
           _minimumWindowUs,
           maxWindow,
-        );
+        ).toInt();
 
     final newStart = _clampWindowStart(
       (center - newDuration / 2).round(),
@@ -653,7 +654,7 @@ class _RecordingViewerState extends State<RecordingViewer> {
           _timelineDurationUs,
           _maximumDetailedWindowUs,
         ),
-      );
+      ).toInt();
     });
 
     _scheduleWindowLoad();
@@ -665,10 +666,12 @@ class _RecordingViewerState extends State<RecordingViewer> {
     }
 
     final selected =
-        await showDialog<_SelectedInterval>(
+        await showModalBottomSheet<_SelectedInterval>(
       context: context,
-      builder: (dialogContext) {
-        return _IntervalDialog(
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return _IntervalPickerSheet(
           timelineUs:
               _timelineDurationUs,
           startUs:
@@ -1307,6 +1310,31 @@ class _RecordingViewerState extends State<RecordingViewer> {
                 language.translate(
               "average",
             ),
+            rrLabel:
+                language.translate(
+              "rr_interval",
+            ),
+            breathLabel:
+                language.translate(
+              "breath_interval",
+            ),
+          ),
+          const SizedBox(height: 10),
+          _RecordingContextCard(
+            statusLabel:
+                language.translate(
+              "status",
+            ),
+            notesLabel:
+                language.translate(
+              "notes",
+            ),
+            status:
+                _localizedStatus(
+              language,
+              status,
+            ),
+            notes: notes,
           ),
           const SizedBox(height: 16),
           _IntervalSelector(
@@ -1379,33 +1407,45 @@ class _RecordingViewerState extends State<RecordingViewer> {
           Row(
             children: [
               SizedBox(
-                width: 46,
+                width: 48,
                 child:
                     OutlinedButton(
                   onPressed: () {
                     _zoomBy(0.5);
                   },
-                  child:
-                      const FittedBox(
-                    fit:
-                        BoxFit.scaleDown,
-                    child: Text('+'),
+                  style:
+                      OutlinedButton.styleFrom(
+                    padding:
+                        EdgeInsets.zero,
+                  ),
+                  child: const Icon(
+                    Icons.zoom_in_rounded,
+                    size: 20,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               SizedBox(
-                width: 46,
+                width: 48,
                 child:
                     OutlinedButton(
-                  onPressed: () {
-                    _zoomBy(2.0);
-                  },
-                  child:
-                      const FittedBox(
-                    fit:
-                        BoxFit.scaleDown,
-                    child: Text('−'),
+                  onPressed:
+                      _windowDurationUs >=
+                              _maximumDetailedWindowUs ||
+                          _windowDurationUs >=
+                              _timelineDurationUs
+                      ? null
+                      : () {
+                          _zoomBy(2.0);
+                        },
+                  style:
+                      OutlinedButton.styleFrom(
+                    padding:
+                        EdgeInsets.zero,
+                  ),
+                  child: const Icon(
+                    Icons.zoom_out_rounded,
+                    size: 20,
                   ),
                 ),
               ),
@@ -1494,14 +1534,6 @@ class _RecordingViewerState extends State<RecordingViewer> {
                 language.translate(
               "technical_details",
             ),
-            rrLabel:
-                language.translate(
-              "rr_interval",
-            ),
-            breathLabel:
-                language.translate(
-              "breath_interval",
-            ),
             sampleRateLabel:
                 language.translate(
               "sample_rate",
@@ -1526,26 +1558,14 @@ class _RecordingViewerState extends State<RecordingViewer> {
                 language.translate(
               "started",
             ),
-            statusLabel:
-                language.translate(
-              "status",
-            ),
             deviceLabel:
                 language.translate(
               "device",
-            ),
-            notesLabel:
-                language.translate(
-              "notes",
             ),
             disclaimer:
                 language.translate(
               "rate_disclaimer",
             ),
-            rrMs: _metrics
-                ?.estimatedMeanRrMs,
-            breathMs: _metrics
-                ?.estimatedMeanBreathMs,
             sampleRate:
                 _sampleRate,
             sampleCount:
@@ -1564,14 +1584,8 @@ class _RecordingViewerState extends State<RecordingViewer> {
                 _formatDateTime(
               startedAtMs,
             ),
-            status:
-                _localizedStatus(
-              language,
-              status,
-            ),
             device:
                 deviceName,
-            notes: notes,
           ),
           if (_error != null) ...[
             const SizedBox(height: 14),
@@ -1773,14 +1787,19 @@ class _GraphCard extends StatelessWidget {
   }
 }
 
-class _IntervalDialog
+enum _IntervalEdge {
+  start,
+  end,
+}
+
+class _IntervalPickerSheet
     extends StatefulWidget {
   final int timelineUs;
   final int startUs;
   final int endUs;
   final int maximumIntervalUs;
 
-  const _IntervalDialog({
+  const _IntervalPickerSheet({
     required this.timelineUs,
     required this.startUs,
     required this.endUs,
@@ -1788,44 +1807,43 @@ class _IntervalDialog
   });
 
   @override
-  State<_IntervalDialog> createState() =>
-      _IntervalDialogState();
+  State<_IntervalPickerSheet> createState() =>
+      _IntervalPickerSheetState();
 }
 
-class _IntervalDialogState
-    extends State<_IntervalDialog> {
-  late final _ClockControllers _start;
-  late final _ClockControllers _end;
+class _IntervalPickerSheetState
+    extends State<_IntervalPickerSheet> {
+  late int _startSeconds;
+  late int _endSeconds;
+  _IntervalEdge _edge =
+      _IntervalEdge.start;
   String? _errorKey;
 
   @override
   void initState() {
     super.initState();
-    _start =
-        _ClockControllers.fromUs(
-      widget.startUs,
-    );
-    _end =
-        _ClockControllers.fromUs(
-      widget.endUs,
-    );
-  }
 
-  @override
-  void dispose() {
-    _start.dispose();
-    _end.dispose();
-    super.dispose();
+    _startSeconds =
+        widget.startUs ~/
+        Duration.microsecondsPerSecond;
+
+    _endSeconds =
+        math.max(
+      _startSeconds + 1,
+      widget.endUs ~/
+          Duration.microsecondsPerSecond,
+    );
   }
 
   void _apply() {
     final startUs =
-        _start.toUs();
+        _startSeconds *
+        Duration.microsecondsPerSecond;
     final endUs =
-        _end.toUs();
+        _endSeconds *
+        Duration.microsecondsPerSecond;
 
-    if (startUs < 0 ||
-        endUs <= startUs) {
+    if (endUs <= startUs) {
       setState(() {
         _errorKey =
             "end_after_start";
@@ -1864,402 +1882,452 @@ class _IntervalDialogState
   Widget build(BuildContext context) {
     final language =
         context.watch<LanguageProvider>();
-    final media =
-        MediaQuery.of(context);
-    final width =
-        (media.size.width - 32)
-            .clamp(0.0, 420.0)
-            .toDouble();
+    final maxSeconds = math.max(
+      0,
+      widget.timelineUs ~/
+          Duration.microsecondsPerSecond,
+    );
 
-    return Dialog(
-      insetPadding:
-          const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 24,
-      ),
-      child: SizedBox(
-        width: width,
-        child: Padding(
-          padding:
-              const EdgeInsets.fromLTRB(
-            18,
-            18,
-            18,
-            14,
-          ),
-          child:
-              SingleChildScrollView(
-            child: Column(
-              mainAxisSize:
-                  MainAxisSize.min,
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .stretch,
-              children: [
-                Text(
-                  language.translate(
-                    "choose_interval",
-                  ),
-                  textAlign:
-                      TextAlign.center,
-                  maxLines: 2,
-                  style:
-                      Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(
-                            fontWeight:
-                                FontWeight
-                                    .w600,
-                          ),
-                ),
-                const SizedBox(
-                  height: 6,
-                ),
-                Text(
-                  '${language.translate(
-                    "recording_length",
-                    <String, Object?>{
-                      "duration":
-                          _formatStatic(
-                        widget.timelineUs,
+    final current =
+        _edge == _IntervalEdge.start
+            ? _startSeconds
+            : _endSeconds;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding:
+            EdgeInsets.only(
+          left: 16,
+          right: 16,
+          bottom:
+              MediaQuery.of(context)
+                      .viewInsets
+                      .bottom +
+                  16,
+        ),
+        child: Column(
+          mainAxisSize:
+              MainAxisSize.min,
+          children: [
+            Text(
+              language.translate(
+                "select_start_end",
+              ),
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(
+                        fontWeight:
+                            FontWeight.w600,
                       ),
-                    },
-                  )}\n'
-                  '${language.translate(
-                    "max_graph_interval",
-                  )}',
-                  textAlign:
-                      TextAlign.center,
-                  style:
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${language.translate(
+                "recording_length",
+                <String, Object?>{
+                  "duration":
+                      _formatPickerDuration(
+                    maxSeconds,
+                  ),
+                },
+              )} · 20 s max',
+              textAlign:
+                  TextAlign.center,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(
+                        color: Theme.of(
+                          context,
+                        )
+                            .colorScheme
+                            .onSurfaceVariant,
+                      ),
+            ),
+            const SizedBox(height: 14),
+            CupertinoSlidingSegmentedControl<
+                _IntervalEdge>(
+              groupValue: _edge,
+              children: {
+                _IntervalEdge.start:
+                    Padding(
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  child: Text(
+                    '${language.translate("start")}  ${_formatPickerDuration(_startSeconds)}',
+                    maxLines: 1,
+                  ),
+                ),
+                _IntervalEdge.end:
+                    Padding(
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  child: Text(
+                    '${language.translate("end")}  ${_formatPickerDuration(_endSeconds)}',
+                    maxLines: 1,
+                  ),
+                ),
+              },
+              onValueChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+
+                setState(() {
+                  _edge = value;
+                  _errorKey = null;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 176,
+              child: _DurationWheelPicker(
+                key: ValueKey(
+                  _edge,
+                ),
+                valueSeconds: current,
+                maximumSeconds:
+                    maxSeconds,
+                onChanged: (value) {
+                  setState(() {
+                    if (_edge ==
+                        _IntervalEdge.start) {
+                      _startSeconds =
+                          value;
+                    } else {
+                      _endSeconds =
+                          value;
+                    }
+
+                    _errorKey = null;
+                  });
+                },
+              ),
+            ),
+            if (_errorKey != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                language.translate(
+                  _errorKey!,
+                ),
+                textAlign:
+                    TextAlign.center,
+                style: TextStyle(
+                  color:
                       Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: Theme.of(
-                              context,
-                            )
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
-                ),
-                const SizedBox(
-                  height: 18,
-                ),
-                _ClockEditor(
-                  label:
-                      language.translate(
-                    "start",
-                  ),
-                  controllers:
-                      _start,
-                ),
-                const SizedBox(
-                  height: 16,
-                ),
-                _ClockEditor(
-                  label:
-                      language.translate(
-                    "end",
-                  ),
-                  controllers:
-                      _end,
-                ),
-                if (_errorKey !=
-                    null) ...[
-                  const SizedBox(
-                    height: 12,
-                  ),
-                  Text(
-                    language.translate(
-                      _errorKey!,
-                    ),
-                    textAlign:
-                        TextAlign.center,
-                    style: TextStyle(
-                      color: Theme.of(
-                        context,
-                      )
                           .colorScheme
                           .error,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(
+                        context,
+                      );
+                    },
+                    child: FittedBox(
+                      fit:
+                          BoxFit.scaleDown,
+                      child: Text(
+                        language.translate(
+                          "cancel",
+                        ),
+                      ),
                     ),
                   ),
-                ],
-                const SizedBox(
-                  height: 16,
                 ),
-                Row(
-                  children: [
-                    Expanded(
-                      child:
-                          TextButton(
-                        onPressed: () {
-                          Navigator.pop(
-                            context,
-                          );
-                        },
-                        child:
-                            FittedBox(
-                          fit:
-                              BoxFit
-                                  .scaleDown,
-                          child: Text(
-                            language
-                                .translate(
-                              "cancel",
-                            ),
-                          ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _apply,
+                    child: FittedBox(
+                      fit:
+                          BoxFit.scaleDown,
+                      child: Text(
+                        language.translate(
+                          "show_interval",
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      width: 8,
-                    ),
-                    Expanded(
-                      child:
-                          FilledButton(
-                        onPressed:
-                            _apply,
-                        child:
-                            FittedBox(
-                          fit:
-                              BoxFit
-                                  .scaleDown,
-                          child: Text(
-                            language
-                                .translate(
-                              "show_interval",
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     );
   }
-
-  static String _formatStatic(
-    int microseconds,
-  ) {
-    final seconds =
-        microseconds ~/ 1000000;
-    final days =
-        seconds ~/ 86400;
-    final hours =
-        (seconds % 86400) ~/ 3600;
-    final minutes =
-        (seconds % 3600) ~/ 60;
-    final secs =
-        seconds % 60;
-
-    String two(int value) =>
-        value
-            .toString()
-            .padLeft(2, '0');
-
-    return days > 0
-        ? '${days}d ${two(hours)}:${two(minutes)}:${two(secs)}'
-        : '${two(hours)}:${two(minutes)}:${two(secs)}';
-  }
 }
 
-class _ClockEditor
-    extends StatelessWidget {
-  final String label;
-  final _ClockControllers controllers;
+class _DurationWheelPicker
+    extends StatefulWidget {
+  final int valueSeconds;
+  final int maximumSeconds;
+  final ValueChanged<int> onChanged;
 
-  const _ClockEditor({
-    required this.label,
-    required this.controllers,
+  const _DurationWheelPicker({
+    super.key,
+    required this.valueSeconds,
+    required this.maximumSeconds,
+    required this.onChanged,
   });
+
+  @override
+  State<_DurationWheelPicker> createState() =>
+      _DurationWheelPickerState();
+}
+
+class _DurationWheelPickerState
+    extends State<_DurationWheelPicker> {
+  late int _days;
+  late int _hours;
+  late int _minutes;
+  late int _seconds;
+
+  late FixedExtentScrollController
+      _daysController;
+  late FixedExtentScrollController
+      _hoursController;
+  late FixedExtentScrollController
+      _minutesController;
+  late FixedExtentScrollController
+      _secondsController;
+
+  int get _maximumDays =>
+      math.max(
+        0,
+        widget.maximumSeconds ~/
+            86400,
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    _setFromSeconds(
+      widget.valueSeconds,
+    );
+    _createControllers();
+  }
+
+  void _setFromSeconds(
+    int total,
+  ) {
+    final safe =
+        total.clamp(
+      0,
+      widget.maximumSeconds,
+    ).toInt();
+
+    _days = safe ~/ 86400;
+    _hours =
+        (safe % 86400) ~/ 3600;
+    _minutes =
+        (safe % 3600) ~/ 60;
+    _seconds =
+        safe % 60;
+  }
+
+  void _createControllers() {
+    _daysController =
+        FixedExtentScrollController(
+      initialItem: _days,
+    );
+    _hoursController =
+        FixedExtentScrollController(
+      initialItem: _hours,
+    );
+    _minutesController =
+        FixedExtentScrollController(
+      initialItem: _minutes,
+    );
+    _secondsController =
+        FixedExtentScrollController(
+      initialItem: _seconds,
+    );
+  }
+
+  @override
+  void dispose() {
+    _daysController.dispose();
+    _hoursController.dispose();
+    _minutesController.dispose();
+    _secondsController.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    final total =
+        (((_days * 24 + _hours) * 60 +
+                    _minutes) *
+                60 +
+            _seconds)
+            .clamp(
+      0,
+      widget.maximumSeconds,
+    )
+            .toInt();
+
+    widget.onChanged(
+      total,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final language =
         context.watch<LanguageProvider>();
 
-    return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          label,
-          style:
-              Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(
-                    fontWeight:
-                        FontWeight.w600,
-                  ),
+        _WheelColumn(
+          controller:
+              _daysController,
+          itemCount:
+              _maximumDays + 1,
+          suffix:
+              language.translate(
+            "day_short",
+          ),
+          onChanged: (value) {
+            _days = value;
+            _emit();
+          },
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _ClockField(
-              controller:
-                  controllers.days,
-              label:
-                  language.translate(
-                "day_short",
-              ),
-            ),
-            const SizedBox(width: 6),
-            _ClockField(
-              controller:
-                  controllers.hours,
-              label:
-                  language.translate(
-                "hour_short",
-              ),
-            ),
-            const SizedBox(width: 6),
-            _ClockField(
-              controller:
-                  controllers.minutes,
-              label:
-                  language.translate(
-                "minute_short",
-              ),
-            ),
-            const SizedBox(width: 6),
-            _ClockField(
-              controller:
-                  controllers.seconds,
-              label:
-                  language.translate(
-                "second_short",
-              ),
-            ),
-          ],
+        _WheelColumn(
+          controller:
+              _hoursController,
+          itemCount: 24,
+          suffix:
+              language.translate(
+            "hour_short",
+          ),
+          onChanged: (value) {
+            _hours = value;
+            _emit();
+          },
+        ),
+        _WheelColumn(
+          controller:
+              _minutesController,
+          itemCount: 60,
+          suffix:
+              language.translate(
+            "minute_short",
+          ),
+          onChanged: (value) {
+            _minutes = value;
+            _emit();
+          },
+        ),
+        _WheelColumn(
+          controller:
+              _secondsController,
+          itemCount: 60,
+          suffix:
+              language.translate(
+            "second_short",
+          ),
+          onChanged: (value) {
+            _seconds = value;
+            _emit();
+          },
         ),
       ],
     );
   }
 }
 
-class _ClockField
+class _WheelColumn
     extends StatelessWidget {
-  final TextEditingController
+  final FixedExtentScrollController
       controller;
-  final String label;
+  final int itemCount;
+  final String suffix;
+  final ValueChanged<int> onChanged;
 
-  const _ClockField({
+  const _WheelColumn({
     required this.controller,
-    required this.label,
+    required this.itemCount,
+    required this.suffix,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: TextField(
-        controller: controller,
-        keyboardType:
-            TextInputType.number,
-        textAlign:
-            TextAlign.center,
-        decoration:
-            InputDecoration(
-          label: FittedBox(
-            fit:
-                BoxFit.scaleDown,
-            child: Text(label),
-          ),
-          isDense: true,
-        ),
+      child: CupertinoPicker.builder(
+        scrollController:
+            controller,
+        itemExtent: 36,
+        useMagnifier: true,
+        magnification: 1.08,
+        squeeze: 1.08,
+        selectionOverlay:
+            const CupertinoPickerDefaultSelectionOverlay(),
+        onSelectedItemChanged:
+            onChanged,
+        childCount: itemCount,
+        itemBuilder: (
+          context,
+          index,
+        ) {
+          return Center(
+            child: FittedBox(
+              fit:
+                  BoxFit.scaleDown,
+              child: Text(
+                '$index $suffix',
+                maxLines: 1,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-class _ClockControllers {
-  final TextEditingController days;
-  final TextEditingController hours;
-  final TextEditingController minutes;
-  final TextEditingController seconds;
+String _formatPickerDuration(
+  int totalSeconds,
+) {
+  final days =
+      totalSeconds ~/ 86400;
+  final hours =
+      (totalSeconds % 86400) ~/ 3600;
+  final minutes =
+      (totalSeconds % 3600) ~/ 60;
+  final seconds =
+      totalSeconds % 60;
 
-  _ClockControllers({
-    required this.days,
-    required this.hours,
-    required this.minutes,
-    required this.seconds,
-  });
+  String two(
+    int value,
+  ) =>
+      value
+          .toString()
+          .padLeft(2, '0');
 
-  factory _ClockControllers.fromUs(
-    int microseconds,
-  ) {
-    final total =
-        microseconds ~/ 1000000;
-
-    return _ClockControllers(
-      days:
-          TextEditingController(
-        text:
-            '${total ~/ 86400}',
-      ),
-      hours:
-          TextEditingController(
-        text:
-            '${(total % 86400) ~/ 3600}',
-      ),
-      minutes:
-          TextEditingController(
-        text:
-            '${(total % 3600) ~/ 60}',
-      ),
-      seconds:
-          TextEditingController(
-        text:
-            '${total % 60}',
-      ),
-    );
+  if (days > 0) {
+    return '${days}d ${two(hours)}:${two(minutes)}:${two(seconds)}';
   }
 
-  int toUs() {
-    final d =
-        int.tryParse(
-              days.text.trim(),
-            ) ??
-            0;
-    final h =
-        int.tryParse(
-              hours.text.trim(),
-            ) ??
-            0;
-    final m =
-        int.tryParse(
-              minutes.text.trim(),
-            ) ??
-            0;
-    final s =
-        int.tryParse(
-              seconds.text.trim(),
-            ) ??
-            0;
-
-    if (d < 0 ||
-        h < 0 ||
-        m < 0 ||
-        s < 0) {
-      return -1;
-    }
-
-    return (((d * 24 + h) * 60 + m) * 60 + s) *
-        1000000;
-  }
-
-  void dispose() {
-    days.dispose();
-    hours.dispose();
-    minutes.dispose();
-    seconds.dispose();
-  }
+  return '${two(hours)}:${two(minutes)}:${two(seconds)}';
 }
 
 class _SelectedInterval {
@@ -2760,11 +2828,15 @@ class _VitalsCard extends StatelessWidget {
   final _ViewerMetrics? metrics;
   final bool loading;
   final String averageLabel;
+  final String rrLabel;
+  final String breathLabel;
 
   const _VitalsCard({
     required this.metrics,
     required this.loading,
     required this.averageLabel,
+    required this.rrLabel,
+    required this.breathLabel,
   });
 
   @override
@@ -2775,14 +2847,22 @@ class _VitalsCard extends StatelessWidget {
     final heart =
         metrics?.estimatedHeartRateBpm;
     final respiration =
-        metrics?.estimatedRespirationRateBpm;
+        metrics
+            ?.estimatedRespirationRateBpm;
+    final rr =
+        metrics?.estimatedMeanRrMs;
+    final breath =
+        metrics
+            ?.estimatedMeanBreathMs;
 
     return Container(
       width: double.infinity,
       padding:
-          const EdgeInsets.symmetric(
-        vertical: 13,
-        horizontal: 8,
+          const EdgeInsets.fromLTRB(
+        8,
+        12,
+        8,
+        10,
       ),
       decoration: BoxDecoration(
         color:
@@ -2794,52 +2874,264 @@ class _VitalsCard extends StatelessWidget {
               scheme.outlineVariant,
         ),
       ),
-      child: SizedBox(
-        height: 76,
-        child: Row(
-          children: [
-            Expanded(
-              child: _VitalValue(
-                value: loading
-                    ? '...'
-                    : heart == null
-                        ? '--'
-                        : heart
-                            .round()
-                            .toString(),
-                unit: 'BPM',
-                label:
-                    averageLabel,
-                accent:
-                    const Color(
-                  0xFFE74C4C,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 74,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _VitalValue(
+                    value: loading
+                        ? '...'
+                        : heart == null
+                            ? '--'
+                            : heart
+                                .round()
+                                .toString(),
+                    unit: 'BPM',
+                    label:
+                        averageLabel,
+                    accent:
+                        const Color(
+                      0xFFE74C4C,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 46,
+                  color: scheme
+                      .outlineVariant,
+                ),
+                Expanded(
+                  child: _VitalValue(
+                    value: loading
+                        ? '...'
+                        : respiration ==
+                                null
+                            ? '--'
+                            : respiration
+                                .round()
+                                .toString(),
+                    unit: 'BRPM',
+                    label:
+                        averageLabel,
+                    accent:
+                        scheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(
+            height: 12,
+            color:
+                scheme.outlineVariant,
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: _SmallMetric(
+                  label: rrLabel,
+                  value: rr == null
+                      ? '--'
+                      : '${rr.toStringAsFixed(0)} ms',
                 ),
               ),
-            ),
-            Container(
-              width: 1,
-              height: 48,
-              color:
-                  scheme.outlineVariant,
-            ),
-            Expanded(
-              child: _VitalValue(
-                value: loading
-                    ? '...'
-                    : respiration == null
-                        ? '--'
-                        : respiration
-                            .round()
-                            .toString(),
-                unit: 'BRPM',
-                label:
-                    averageLabel,
-                accent:
-                    scheme.primary,
+              Container(
+                width: 1,
+                height: 24,
+                color: scheme
+                    .outlineVariant,
               ),
+              Expanded(
+                child: _SmallMetric(
+                  label:
+                      breathLabel,
+                  value: breath == null
+                      ? '--'
+                      : '${breath.toStringAsFixed(0)} ms',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SmallMetric extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SmallMetric({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 2,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow:
+                  TextOverflow.ellipsis,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(
+                        color: scheme
+                            .onSurfaceVariant,
+                      ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style:
+                Theme.of(context)
+                    .textTheme
+                    .labelMedium
+                    ?.copyWith(
+                      fontWeight:
+                          FontWeight.w600,
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordingContextCard
+    extends StatelessWidget {
+  final String statusLabel;
+  final String notesLabel;
+  final String status;
+  final String? notes;
+
+  const _RecordingContextCard({
+    required this.statusLabel,
+    required this.notesLabel,
+    required this.status,
+    required this.notes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding:
+          const EdgeInsets.fromLTRB(
+        14,
+        12,
+        14,
+        12,
+      ),
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainer,
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              scheme.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                statusLabel,
+                style:
+                    Theme.of(context)
+                        .textTheme
+                        .labelMedium
+                        ?.copyWith(
+                          color: scheme
+                              .onSurfaceVariant,
+                        ),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
+                ),
+                decoration:
+                    BoxDecoration(
+                  borderRadius:
+                      BorderRadius.circular(
+                    999,
+                  ),
+                  color: scheme.primary
+                      .withValues(
+                    alpha: 0.10,
+                  ),
+                ),
+                child: Text(
+                  status,
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                            color:
+                                scheme.primary,
+                          ),
+                ),
+              ),
+            ],
+          ),
+          if (notes != null &&
+              notes!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              notesLabel,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .labelMedium
+                      ?.copyWith(
+                        color: scheme
+                            .onSurfaceVariant,
+                      ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              notes!,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .bodyMedium,
             ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -3080,55 +3372,39 @@ class _IntervalSelector
 class _TechnicalDetailsCard
     extends StatelessWidget {
   final String title;
-  final String rrLabel;
-  final String breathLabel;
   final String sampleRateLabel;
   final String samplesLabel;
   final String coverageLabel;
   final String measuredLabel;
   final String timelineLabel;
   final String startedLabel;
-  final String statusLabel;
   final String deviceLabel;
-  final String notesLabel;
   final String disclaimer;
-  final double? rrMs;
-  final double? breathMs;
   final double sampleRate;
   final int sampleCount;
   final int timelineDurationUs;
   final String measuredDuration;
   final String timelineDuration;
   final String started;
-  final String status;
   final String? device;
-  final String? notes;
 
   const _TechnicalDetailsCard({
     required this.title,
-    required this.rrLabel,
-    required this.breathLabel,
     required this.sampleRateLabel,
     required this.samplesLabel,
     required this.coverageLabel,
     required this.measuredLabel,
     required this.timelineLabel,
     required this.startedLabel,
-    required this.statusLabel,
     required this.deviceLabel,
-    required this.notesLabel,
     required this.disclaimer,
-    required this.rrMs,
-    required this.breathMs,
     required this.sampleRate,
     required this.sampleCount,
     required this.timelineDurationUs,
     required this.measuredDuration,
     required this.timelineDuration,
     required this.started,
-    required this.status,
     required this.device,
-    required this.notes,
   });
 
   @override
@@ -3140,11 +3416,13 @@ class _TechnicalDetailsCard
         timelineDurationUs /
         Duration
             .microsecondsPerSecond;
+
     final measuredSeconds =
         sampleRate <= 0
             ? 0.0
             : sampleCount /
                 sampleRate;
+
     final coverage =
         timelineSeconds <= 0
             ? 0.0
@@ -3158,18 +3436,6 @@ class _TechnicalDetailsCard
 
     final rows =
         <MapEntry<String, String>>[
-      MapEntry(
-        rrLabel,
-        rrMs == null
-            ? '--'
-            : '${rrMs!.toStringAsFixed(0)} ms',
-      ),
-      MapEntry(
-        breathLabel,
-        breathMs == null
-            ? '--'
-            : '${breathMs!.toStringAsFixed(0)} ms',
-      ),
       MapEntry(
         sampleRateLabel,
         '${sampleRate.toStringAsFixed(0)} Hz',
@@ -3195,10 +3461,6 @@ class _TechnicalDetailsCard
       MapEntry(
         startedLabel,
         started,
-      ),
-      MapEntry(
-        statusLabel,
-        status,
       ),
       MapEntry(
         deviceLabel,
@@ -3251,29 +3513,6 @@ class _TechnicalDetailsCard
               value: entry.value,
             ),
           ),
-          if (notes != null &&
-              notes!.trim().isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              notesLabel,
-              style:
-                  Theme.of(context)
-                      .textTheme
-                      .labelMedium
-                      ?.copyWith(
-                        color: scheme
-                            .onSurfaceVariant,
-                      ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              notes!,
-              style:
-                  Theme.of(context)
-                      .textTheme
-                      .bodySmall,
-            ),
-          ],
           const SizedBox(height: 12),
           Text(
             disclaimer,

@@ -42,9 +42,13 @@ class _LiveState extends State<Live> {
               ),
             ),
             SizedBox(height: 28),
-            ElevatedButton(
+            FilledButton(
               onPressed: widget.onGoToSettings,
-              child: Text(languageProvider.translate("settings_tab")),
+              child: Text(
+                languageProvider.translate(
+                  "settings_tab",
+                ),
+              ),
             ),
             SizedBox(height: 50),
           ],
