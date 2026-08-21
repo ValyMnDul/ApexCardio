@@ -47,25 +47,58 @@ class RecordingAnalysisService {
       throw StateError('Recording not found.');
     }
 
-    final sampleRate = (row['sample_rate'] as num?)?.toDouble() ?? 250.0;
+    final sampleRate =
+        (row['sample_rate'] as num?)?.toDouble() ?? 250.0;
     final timelineUs = row['timeline_duration_us'] as int? ?? 0;
-    final gaps = await _database.getAllGaps(recordingId);
+    final db = await _database.database;
 
-    var gapDurationUs = 0;
+    final gapAggregate = await db.rawQuery(
+      '''
+      SELECT
+        COUNT(*) AS gap_count,
+        COALESCE(
+          SUM(
+            CASE
+              WHEN end_elapsed_us IS NULL THEN 0
+              WHEN end_elapsed_us > start_elapsed_us
+                THEN end_elapsed_us - start_elapsed_us
+              ELSE 0
+            END
+          ),
+          0
+        ) AS gap_duration_us
+      FROM recording_gaps
+      WHERE recording_id = ?
+      ''',
+      <Object?>[
+        recordingId,
+      ],
+    );
 
-    for (final gap in gaps) {
-      final start = gap['start_elapsed_us'] as int? ?? 0;
-      final end = gap['end_elapsed_us'] as int? ?? start;
-      gapDurationUs += math.max(0, end - start);
-    }
+    final aggregate =
+        gapAggregate.isEmpty
+            ? const <String, Object?>{}
+            : gapAggregate.first;
 
-    if (timelineUs <= 0 || sampleRate <= 0) {
+    final gapCount =
+        (aggregate['gap_count'] as num?)
+                ?.toInt() ??
+            0;
+
+    final gapDurationUs =
+        (aggregate['gap_duration_us']
+                    as num?)
+                ?.toInt() ??
+            0;
+
+    if (timelineUs <= 0 ||
+        sampleRate <= 0) {
       return RecordingAnalysisSummary(
         averageHeartRateBpm: null,
         averageRespirationRateBrpm: null,
         averageRrMs: null,
         averageBreathIntervalMs: null,
-        gapCount: gaps.length,
+        gapCount: gapCount,
         gapDurationUs: gapDurationUs,
         analyzedWindows: 0,
       );
@@ -76,7 +109,10 @@ class RecordingAnalysisService {
     final respirationRates = <double>[];
 
     for (final startUs in starts) {
-      final endUs = math.min(timelineUs, startUs + _analysisWindowUs);
+      final endUs = math.min(
+        timelineUs,
+        startUs + _analysisWindowUs,
+      );
 
       final signals = await _loadSignals(
         recordingId: recordingId,
@@ -108,7 +144,9 @@ class RecordingAnalysisService {
           smoothingRadius: 8,
         );
 
-        if (respiration != null && respiration >= 3 && respiration <= 60) {
+        if (respiration != null &&
+            respiration >= 3 &&
+            respiration <= 60) {
           respirationRates.add(respiration);
         }
       }
@@ -125,9 +163,9 @@ class RecordingAnalysisService {
           : 60000.0 / averageHeartRate,
       averageBreathIntervalMs:
           averageRespiration == null || averageRespiration <= 0
-          ? null
-          : 60000.0 / averageRespiration,
-      gapCount: gaps.length,
+              ? null
+              : 60000.0 / averageRespiration,
+      gapCount: gapCount,
       gapDurationUs: gapDurationUs,
       analyzedWindows: starts.length,
     );
@@ -175,7 +213,12 @@ class RecordingAnalysisService {
           AND start_elapsed_us < ?
           AND end_elapsed_us > ?
         ''',
-        whereArgs: <Object?>[recordingId, lastChunkIndex, endUs, startUs],
+        whereArgs: <Object?>[
+          recordingId,
+          lastChunkIndex,
+          endUs,
+          startUs,
+        ],
         orderBy: 'chunk_index ASC',
         limit: _chunkPageSize,
       );
@@ -207,7 +250,8 @@ class RecordingAnalysisService {
         final samplePeriodUs = 1000000.0 / sampleRate;
 
         for (int i = 0; i < sampleCount; i++) {
-          final elapsedUs = chunkStartUs + (i * samplePeriodUs).round();
+          final elapsedUs =
+              chunkStartUs + (i * samplePeriodUs).round();
 
           if (elapsedUs < startUs) {
             continue;
@@ -218,13 +262,26 @@ class RecordingAnalysisService {
           }
 
           final offset = i * 8;
-          ecg.add(data.getInt32(offset, Endian.little).toDouble());
-          respiration.add(data.getInt32(offset + 4, Endian.little).toDouble());
+          ecg.add(
+            data.getInt32(
+              offset,
+              Endian.little,
+            ).toDouble(),
+          );
+          respiration.add(
+            data.getInt32(
+              offset + 4,
+              Endian.little,
+            ).toDouble(),
+          );
         }
       }
     }
 
-    return _SignalWindow(ecg: ecg, respiration: respiration);
+    return _SignalWindow(
+      ecg: ecg,
+      respiration: respiration,
+    );
   }
 
   double? _estimateRate({
@@ -238,7 +295,10 @@ class RecordingAnalysisService {
       return null;
     }
 
-    final smoothed = _smooth(values, smoothingRadius);
+    final smoothed = _smooth(
+      values,
+      smoothingRadius,
+    );
 
     final mean = smoothed.reduce((a, b) => a + b) / smoothed.length;
     var variance = 0.0;
@@ -314,13 +374,24 @@ class RecordingAnalysisService {
     return 60.0 / averageInterval;
   }
 
-  List<double> _smooth(List<double> values, int radius) {
+  List<double> _smooth(
+    List<double> values,
+    int radius,
+  ) {
     if (radius <= 0 || values.length < 3) {
       return List<double>.from(values);
     }
 
-    final output = List<double>.filled(values.length, 0, growable: false);
-    final prefix = List<double>.filled(values.length + 1, 0, growable: false);
+    final output = List<double>.filled(
+      values.length,
+      0,
+      growable: false,
+    );
+    final prefix = List<double>.filled(
+      values.length + 1,
+      0,
+      growable: false,
+    );
 
     for (int i = 0; i < values.length; i++) {
       prefix[i + 1] = prefix[i] + values[i];
@@ -329,7 +400,8 @@ class RecordingAnalysisService {
     for (int i = 0; i < values.length; i++) {
       final start = math.max(0, i - radius);
       final end = math.min(values.length - 1, i + radius);
-      output[i] = (prefix[end + 1] - prefix[start]) / (end - start + 1);
+      output[i] =
+          (prefix[end + 1] - prefix[start]) / (end - start + 1);
     }
 
     return output;
@@ -348,5 +420,8 @@ class _SignalWindow {
   final List<double> ecg;
   final List<double> respiration;
 
-  const _SignalWindow({required this.ecg, required this.respiration});
+  const _SignalWindow({
+    required this.ecg,
+    required this.respiration,
+  });
 }

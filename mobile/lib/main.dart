@@ -20,7 +20,9 @@ import 'tabs/settings.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await FlutterBluePlus.setOptions(restoreState: true);
+  await FlutterBluePlus.setOptions(
+    restoreState: true,
+  );
 
   RecordingBackgroundService.prepareCommunication();
 
@@ -34,7 +36,9 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => LiveEcgProvider()),
         ChangeNotifierProvider(
           lazy: false,
-          create: (context) => RecordingProvider(context.read<BleProvider>()),
+          create: (context) => RecordingProvider(
+            context.read<BleProvider>(),
+          ),
         ),
       ],
       child: const App(),
@@ -47,18 +51,21 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    final fontScaleProvider = Provider.of<FontScaleProvider>(context);
+    final themeProvider = context.watch<ThemeProvider>();
+    final fontScaleProvider = context.watch<FontScaleProvider>();
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: lightMode,
       darkTheme: darkMode,
-      themeMode: themeProvider.darkmode ? ThemeMode.dark : ThemeMode.light,
+      themeMode:
+          themeProvider.darkmode ? ThemeMode.dark : ThemeMode.light,
       builder: (context, child) {
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(fontScaleProvider.fontScale),
+            textScaler: TextScaler.linear(
+              fontScaleProvider.fontScale,
+            ),
           ),
           child: child!,
         );
@@ -75,13 +82,17 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> with TickerProviderStateMixin {
+class _HomeState extends State<Home>
+    with TickerProviderStateMixin {
   late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+    );
   }
 
   @override
@@ -92,75 +103,111 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final languageProvider = Provider.of<LanguageProvider>(context);
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final languageProvider =
+        context.watch<LanguageProvider>();
+    final themeProvider =
+        context.watch<ThemeProvider>();
+    final recording =
+        context.watch<RecordingProvider>();
+
+    final scheme =
+        Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 68,
         centerTitle: true,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         titleSpacing: 12,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text.rich(
-              TextSpan(
-                style: const TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 21,
-                  height: 1,
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.graphic_eq_rounded,
+                color: Colors.teal[800],
+                size: 29,
+              ),
+              const SizedBox(width: 9),
+              Text.rich(
+                TextSpan(
+                  style: const TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 22,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: 'APEX',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w400,
+                        color: themeProvider.darkmode
+                            ? Colors.teal[100]
+                            : Colors.grey[800],
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' CARDIO',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: Colors.teal[800],
+                      ),
+                    ),
+                  ],
                 ),
-                children: [
-                  TextSpan(
-                    text: 'APEX',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w400,
-                      color: themeProvider.darkmode
-                          ? Colors.teal[100]
-                          : Colors.grey[850],
+              ),
+              if (recording.hasActiveRecording) ...[
+                const SizedBox(width: 10),
+                _RecordingHeaderPulse(
+                  active:
+                      recording.isRecording &&
+                      recording.bleConnected &&
+                      recording.activeGapReason == null,
+                  paused:
+                      recording.isPaused ||
+                      !recording.bleConnected,
+                ),
+              ],
+            ],
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(65),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TabBar(
+                controller: _tabController,
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                tabs: [
+                  _ResponsiveTab(
+                    icon: Icons.favorite_rounded,
+                    label: languageProvider.translate(
+                      "live_tab",
                     ),
                   ),
-                  TextSpan(
-                    text: ' CARDIO',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.teal[700],
+                  _ResponsiveTab(
+                    icon: Icons.folder_rounded,
+                    label: languageProvider.translate(
+                      "recordings_tab",
+                    ),
+                  ),
+                  _ResponsiveTab(
+                    icon: Icons.settings_rounded,
+                    label: languageProvider.translate(
+                      "settings_tab",
                     ),
                   ),
                 ],
               ),
-            ),
-            Consumer<RecordingProvider>(
-              builder: (context, recording, child) {
-                if (!recording.hasActiveRecording) {
-                  return const SizedBox.shrink();
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: _AppRecordingDot(
-                    active: recording.isRecording && recording.bleConnected,
-                    paused: recording.isPaused || !recording.bleConnected,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(44),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: TabBar(
-              controller: _tabController,
-              dividerColor: Colors.transparent,
-              labelPadding: const EdgeInsets.symmetric(horizontal: 12),
-              tabs: [
-                Tab(text: languageProvider.translate('live_tab')),
-                Tab(text: languageProvider.translate('recordings_tab')),
-                Tab(text: languageProvider.translate('settings_tab')),
-              ],
-            ),
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: scheme.outlineVariant,
+              ),
+            ],
           ),
         ),
       ),
@@ -178,21 +225,69 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   }
 }
 
-class _AppRecordingDot extends StatefulWidget {
+class _ResponsiveTab extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _ResponsiveTab({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tab(
+      height: 63,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 2,
+        ),
+        child: Column(
+          mainAxisAlignment:
+              MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 22,
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 100,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordingHeaderPulse extends StatefulWidget {
   final bool active;
   final bool paused;
 
-  const _AppRecordingDot({required this.active, required this.paused});
+  const _RecordingHeaderPulse({
+    required this.active,
+    required this.paused,
+  });
 
   @override
-  State<_AppRecordingDot> createState() => _AppRecordingDotState();
+  State<_RecordingHeaderPulse> createState() =>
+      _RecordingHeaderPulseState();
 }
 
-class _AppRecordingDotState extends State<_AppRecordingDot>
+class _RecordingHeaderPulseState
+    extends State<_RecordingHeaderPulse>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _scale;
   late final Animation<double> _opacity;
+  late final Animation<double> _scale;
 
   @override
   void initState() {
@@ -200,36 +295,52 @@ class _AppRecordingDotState extends State<_AppRecordingDot>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 950),
+      duration:
+          const Duration(milliseconds: 900),
     );
-
-    if (widget.active) {
-      _controller.repeat(reverse: true);
-    }
-
-    _scale = Tween<double>(
-      begin: 0.90,
-      end: 1.16,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
 
     _opacity = Tween<double>(
       begin: 1,
-      end: 0.48,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+      end: 0.35,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    _scale = Tween<double>(
+      begin: 1,
+      end: 1.22,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    _syncAnimation();
   }
 
   @override
-  void didUpdateWidget(covariant _AppRecordingDot oldWidget) {
+  void didUpdateWidget(
+    covariant _RecordingHeaderPulse oldWidget,
+  ) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.active != widget.active) {
-      if (widget.active) {
-        _controller.repeat(reverse: true);
-      } else {
-        _controller
-          ..stop()
-          ..value = 0;
-      }
+    if (oldWidget.active != widget.active ||
+        oldWidget.paused != widget.paused) {
+      _syncAnimation();
+    }
+  }
+
+  void _syncAnimation() {
+    if (widget.active) {
+      _controller.repeat(reverse: true);
+    } else {
+      _controller
+        ..stop()
+        ..value = 0;
     }
   }
 
@@ -241,28 +352,41 @@ class _AppRecordingDotState extends State<_AppRecordingDot>
 
   @override
   Widget build(BuildContext context) {
-    final dotColor = widget.paused
-        ? Theme.of(context).colorScheme.tertiary
-        : const Color(0xFFE74C4C);
+    final scheme =
+        Theme.of(context).colorScheme;
+    final color = widget.paused
+        ? scheme.tertiary
+        : scheme.error;
 
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
         return Opacity(
-          opacity: widget.active ? _opacity.value : 1,
+          opacity:
+              widget.active ? _opacity.value : 1,
           child: Transform.scale(
-            scale: widget.active ? _scale.value : 1,
-            child: Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: dotColor,
-              ),
-            ),
+            scale:
+                widget.active ? _scale.value : 1,
+            child: child,
           ),
         );
       },
+      child: Container(
+        width: 9,
+        height: 9,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: [
+            BoxShadow(
+              color:
+                  color.withValues(alpha: 0.28),
+              blurRadius: 5,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

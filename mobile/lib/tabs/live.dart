@@ -73,6 +73,7 @@ class _LiveState extends State<Live> {
                           child: _Heart(
                             bpm: ble.heartRate,
                             beatSerial: ble.heartBeatSerial,
+                            label: languageProvider.translate("heart_rate"),
                           ),
                         ),
                       ),
@@ -86,6 +87,7 @@ class _LiveState extends State<Live> {
                           child: _Respiration(
                             respiratoryRate: ble.respiratoryRate,
                             respirationLevel: ble.respirationLevel,
+                            label: languageProvider.translate("respiration"),
                           ),
                         ),
                       ),
@@ -135,7 +137,7 @@ class _LiveState extends State<Live> {
                 builder: (context, ble, child) {
                   return _Graph(
                     time: "12 s",
-                    title: "Respiration",
+                    title: languageProvider.translate("respiration"),
                     child: RepaintBoundary(
                       child: CustomPaint(
                         painter: RespirationPainter(
@@ -220,8 +222,13 @@ class _Graph extends StatelessWidget {
 class _Heart extends StatefulWidget {
   final double bpm;
   final int beatSerial;
+  final String label;
 
-  const _Heart({required this.bpm, required this.beatSerial});
+  const _Heart({
+    required this.bpm,
+    required this.beatSerial,
+    required this.label,
+  });
 
   @override
   State<_Heart> createState() => _HeartState();
@@ -360,7 +367,7 @@ class _HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
                 ),
                 SizedBox(height: 5),
                 Text(
-                  "Heart rate",
+                  widget.label,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -377,10 +384,12 @@ class _HeartState extends State<_Heart> with SingleTickerProviderStateMixin {
 class _Respiration extends StatelessWidget {
   final double respiratoryRate;
   final double respirationLevel;
+  final String label;
 
   const _Respiration({
     required this.respirationLevel,
     required this.respiratoryRate,
+    required this.label,
   });
 
   @override
@@ -475,7 +484,7 @@ class _Respiration extends StatelessWidget {
                 ),
                 SizedBox(height: 5),
                 Text(
-                  "Respiration",
+                  label,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),

@@ -11,7 +11,10 @@ import 'package:sqflite/sqflite.dart';
 
 import 'recording_database.dart';
 
-enum RecordingExportFormat { apex, csv }
+enum RecordingExportFormat {
+  apex,
+  csv,
+}
 
 class RecordingExportResult {
   final RecordingExportFormat format;
@@ -54,14 +57,19 @@ class RecordingExportService {
     }
 
     final root = Directory(
-      p.join((await getTemporaryDirectory()).path, 'apexcardio_exports'),
+      p.join(
+        (await getTemporaryDirectory()).path,
+        'apexcardio_exports',
+      ),
     );
 
     if (!await root.exists()) {
       await root.create(recursive: true);
     }
 
-    final name = _safeFileName(recording['name'] as String? ?? 'recording');
+    final name = _safeFileName(
+      recording['name'] as String? ?? 'recording',
+    );
     final uid = recording['recording_uid'] as String?;
     final suffix = uid == null || uid.isEmpty
         ? recordingId.toString()
@@ -124,7 +132,7 @@ class RecordingExportService {
               result.filePath,
               mimeType: format == RecordingExportFormat.csv
                   ? 'text/csv'
-                  : 'application/octet-stream',
+                  : 'application/x-apexcardio',
             ),
           ],
           fileNameOverrides: <String>[result.fileName],
@@ -206,11 +214,14 @@ class RecordingExportService {
         conflictAlgorithm: ConflictAlgorithm.abort,
       );
 
-      await destination.insert('apex_manifest', <String, Object?>{
-        'format': 'ApexCardio Recording',
-        'format_version': 1,
-        'created_at_ms': DateTime.now().millisecondsSinceEpoch,
-      });
+      await destination.insert(
+        'apex_manifest',
+        <String, Object?>{
+          'format': 'ApexCardio Recording',
+          'format_version': 1,
+          'created_at_ms': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
 
       var lastChunkIndex = -1;
 
@@ -218,7 +229,10 @@ class RecordingExportService {
         final rows = await source.query(
           'signal_chunks',
           where: 'recording_id = ? AND chunk_index > ?',
-          whereArgs: <Object?>[recordingId, lastChunkIndex],
+          whereArgs: <Object?>[
+            recordingId,
+            lastChunkIndex,
+          ],
           orderBy: 'chunk_index ASC',
           limit: _pageSize,
         );
@@ -244,7 +258,10 @@ class RecordingExportService {
               (row['chunk_index'] as num?)?.toInt() ?? lastChunkIndex;
         }
 
-        await batch.commit(noResult: true, continueOnError: false);
+        await batch.commit(
+          noResult: true,
+          continueOnError: false,
+        );
       }
 
       var lastGapId = 0;
@@ -253,7 +270,10 @@ class RecordingExportService {
         final rows = await source.query(
           'recording_gaps',
           where: 'recording_id = ? AND id > ?',
-          whereArgs: <Object?>[recordingId, lastGapId],
+          whereArgs: <Object?>[
+            recordingId,
+            lastGapId,
+          ],
           orderBy: 'id ASC',
           limit: _pageSize,
         );
@@ -278,7 +298,10 @@ class RecordingExportService {
           lastGapId = (row['id'] as num?)?.toInt() ?? lastGapId;
         }
 
-        await batch.commit(noResult: true, continueOnError: false);
+        await batch.commit(
+          noResult: true,
+          continueOnError: false,
+        );
       }
 
       await destination.execute('PRAGMA user_version = 1');
@@ -320,14 +343,18 @@ class RecordingExportService {
       await output.delete();
     }
 
-    final sampleRate = (recording['sample_rate'] as num?)?.toDouble() ?? 250.0;
+    final sampleRate =
+        (recording['sample_rate'] as num?)?.toDouble() ?? 250.0;
 
     if (!sampleRate.isFinite || sampleRate <= 0) {
       throw StateError('Invalid sample rate.');
     }
 
     final db = await _database.database;
-    final sink = output.openWrite(mode: FileMode.writeOnly, encoding: utf8);
+    final sink = output.openWrite(
+      mode: FileMode.writeOnly,
+      encoding: utf8,
+    );
     final samplePeriodUs = 1000000.0 / sampleRate;
 
     try {
@@ -338,7 +365,10 @@ class RecordingExportService {
         final rows = await db.query(
           'signal_chunks',
           where: 'recording_id = ? AND chunk_index > ?',
-          whereArgs: <Object?>[recordingId, lastChunkIndex],
+          whereArgs: <Object?>[
+            recordingId,
+            lastChunkIndex,
+          ],
           orderBy: 'chunk_index ASC',
           limit: _pageSize,
         );

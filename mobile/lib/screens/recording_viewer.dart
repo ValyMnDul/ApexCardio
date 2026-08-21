@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/language.dart';
 import '../services/recording_analysis_service.dart';
 import '../services/recording_database.dart';
 import '../services/recording_export_service.dart';
@@ -12,7 +15,10 @@ import '../services/recording_report_service.dart';
 class RecordingViewer extends StatefulWidget {
   final int recordingId;
 
-  const RecordingViewer({super.key, required this.recordingId});
+  const RecordingViewer({
+    super.key,
+    required this.recordingId,
+  });
 
   @override
   State<RecordingViewer> createState() => _RecordingViewerState();
@@ -20,53 +26,85 @@ class RecordingViewer extends StatefulWidget {
 
 class _RecordingViewerState extends State<RecordingViewer> {
   final RecordingDatabase _database = RecordingDatabase.instance;
-  final RecordingAnalysisService _analysis = RecordingAnalysisService.instance;
 
   Map<String, Object?>? _recording;
-  RecordingAnalysisSummary? _summary;
   List<_DecodedSample> _samples = const [];
-  List<_Gap> _gaps = const [];
+  List<_RecordingGap> _gaps = const [];
 
-  bool _loading = true;
-  bool _loadingSignal = false;
-  bool _working = false;
+  bool _loadingRecording = true;
+  bool _loadingWindow = false;
+  bool _loadingMetrics = false;
+  bool _workingAction = false;
   String? _error;
 
-  double _sampleRate = 250.0;
-  int _timelineUs = 0;
-  int _intervalStartUs = 0;
-  int _intervalEndUs = 10 * 1000000;
+  _ViewerMetrics? _metrics;
 
-  static const int _defaultIntervalUs = 10 * 1000000;
-  static const int _maximumDisplayPoints = 6000;
-  static const int _maximumIntervalUs = 10 * 60 * 1000000;
-  static const int _chunkPageSize = 180;
+  int _timelineDurationUs = 0;
+  int _windowStartUs = 0;
+  int _windowDurationUs = 10 * 1000000;
+  int _intervalBaseStartUs = 0;
+  int _intervalBaseDurationUs = 10 * 1000000;
+
+  double _sampleRate = 250.0;
+
+  Timer? _windowLoadDebounce;
+  int _windowRequestSerial = 0;
+
+  double _gestureWidth = 1.0;
+  int _gestureStartWindowUs = 0;
+  int _gestureStartDurationUs = 10 * 1000000;
+  double _gestureStartFocalX = 0.0;
+  int _gestureAnchorTimeUs = 0;
+
+  static const int _minimumWindowUs = 2 * 1000000;
+  static const int _maximumDetailedWindowUs = 10 * 60 * 1000000;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadRecording();
   }
 
-  Future<void> _load() async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
+  @override
+  void dispose() {
+    _windowLoadDebounce?.cancel();
+    super.dispose();
+  }
+
+  int get _windowEndUs {
+    return math.min(
+      _timelineDurationUs,
+      _windowStartUs + _windowDurationUs,
+    );
+  }
+
+  Future<void> _loadRecording() async {
+    setState(() {
+      _loadingRecording = true;
+      _error = null;
+    });
 
     try {
-      final recording = await _database.getRecordingById(widget.recordingId);
+      final recording = await _database.getRecordingById(
+        widget.recordingId,
+      );
 
       if (recording == null) {
         throw StateError('Recording not found.');
       }
 
-      final timelineUs = recording['timeline_duration_us'] as int? ?? 0;
+      final timelineDurationUs =
+          recording['timeline_duration_us'] as int? ?? 0;
+
       final sampleRate =
           (recording['sample_rate'] as num?)?.toDouble() ?? 250.0;
-      final initialEnd = math.min(math.max(timelineUs, 0), _defaultIntervalUs);
+
+      final initialWindow = timelineDurationUs <= 0
+          ? 10 * 1000000
+          : math.min(
+              timelineDurationUs,
+              10 * 1000000,
+            );
 
       if (!mounted) {
         return;
@@ -74,210 +112,896 @@ class _RecordingViewerState extends State<RecordingViewer> {
 
       setState(() {
         _recording = recording;
-        _timelineUs = timelineUs;
+        _timelineDurationUs = timelineDurationUs;
         _sampleRate = sampleRate > 0 ? sampleRate : 250.0;
-        _intervalStartUs = 0;
-        _intervalEndUs = initialEnd > 0 ? initialEnd : _defaultIntervalUs;
-        _loading = false;
+        _windowStartUs = 0;
+        _windowDurationUs = math.max(
+          _minimumWindowUs,
+          initialWindow,
+        );
+        _intervalBaseStartUs = 0;
+        _intervalBaseDurationUs =
+            _windowDurationUs;
+        _loadingRecording = false;
       });
 
-      await Future.wait<void>([_loadSignalInterval(), _loadAnalysis()]);
+      await Future.wait<void>([
+        _loadVisibleWindow(),
+        _loadOverviewMetrics(),
+      ]);
     } catch (error) {
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _loading = false;
+        _loadingRecording = false;
         _error = error.toString();
       });
     }
   }
 
-  Future<void> _loadAnalysis() async {
-    final recording = _recording;
-
-    if (recording == null) {
-      return;
-    }
-
-    try {
-      final summary = await _analysis.analyze(
-        recordingId: widget.recordingId,
-        recording: recording,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summary = summary;
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _loadSignalInterval() async {
-    if (_timelineUs <= 0) {
-      if (mounted) {
-        setState(() {
-          _samples = const [];
-          _gaps = const [];
-          _loadingSignal = false;
-        });
-      }
+  Future<void> _loadOverviewMetrics() async {
+    if (_loadingMetrics) {
       return;
     }
 
     if (mounted) {
       setState(() {
-        _loadingSignal = true;
+        _loadingMetrics = true;
       });
     }
 
     try {
-      final startUs = _intervalStartUs.clamp(0, _timelineUs).toInt();
-      final endUs = _intervalEndUs.clamp(startUs + 1, _timelineUs).toInt();
-      final durationUs = endUs - startUs;
-      final expectedSamples = durationUs / 1000000.0 * _sampleRate;
-      final stride = math.max(
-        1,
-        (expectedSamples / _maximumDisplayPoints).ceil(),
-      );
-      final samplePeriodUs = 1000000.0 / _sampleRate;
-      final db = await _database.database;
-      final decoded = <_DecodedSample>[];
-      var lastChunkIndex = -1;
-      var globalVisibleIndex = 0;
-
-      while (true) {
-        final rows = await db.query(
-          'signal_chunks',
-          where: '''
-            recording_id = ?
-            AND chunk_index > ?
-            AND start_elapsed_us < ?
-            AND end_elapsed_us > ?
-          ''',
-          whereArgs: <Object?>[
-            widget.recordingId,
-            lastChunkIndex,
-            endUs,
-            startUs,
-          ],
-          orderBy: 'chunk_index ASC',
-          limit: _chunkPageSize,
-        );
-
-        if (rows.isEmpty) {
-          break;
-        }
-
-        for (final row in rows) {
-          lastChunkIndex =
-              (row['chunk_index'] as num?)?.toInt() ?? lastChunkIndex;
-          final sampleCount = row['sample_count'] as int? ?? 0;
-          final chunkStartUs = row['start_elapsed_us'] as int? ?? 0;
-          final raw = row['signal_data'];
-          final bytes = switch (raw) {
-            Uint8List value => value,
-            List<int> value => Uint8List.fromList(value),
-            _ => null,
-          };
-
-          if (bytes == null ||
-              sampleCount <= 0 ||
-              bytes.length < sampleCount * 8) {
-            continue;
-          }
-
-          final data = ByteData.sublistView(bytes);
-
-          for (int i = 0; i < sampleCount; i++) {
-            final elapsedUs = chunkStartUs + (i * samplePeriodUs).round();
-
-            if (elapsedUs < startUs) {
-              continue;
-            }
-
-            if (elapsedUs >= endUs) {
-              break;
-            }
-
-            if (globalVisibleIndex % stride == 0) {
-              final offset = i * 8;
-              decoded.add(
-                _DecodedSample(
-                  elapsedUs: elapsedUs,
-                  ecg: data.getInt32(offset, Endian.little).toDouble(),
-                  respiration: data
-                      .getInt32(offset + 4, Endian.little)
-                      .toDouble(),
-                ),
-              );
-            }
-
-            globalVisibleIndex++;
-          }
-        }
-      }
-
-      final gapRows = await _database.getGapsInRange(
+      final summary =
+          await RecordingAnalysisService.instance.analyze(
         recordingId: widget.recordingId,
-        startElapsedUs: startUs,
-        endElapsedUs: endUs,
+        recording: _recording,
       );
-      final gaps = gapRows.map(_Gap.fromRow).toList(growable: false);
 
       if (!mounted) {
         return;
       }
+
+      setState(() {
+        _metrics = _ViewerMetrics(
+          estimatedHeartRateBpm:
+              summary.averageHeartRateBpm,
+          estimatedMeanRrMs:
+              summary.averageRrMs,
+          estimatedRespirationRateBpm:
+              summary.averageRespirationRateBrpm,
+          estimatedMeanBreathMs:
+              summary.averageBreathIntervalMs,
+          analyzedSamples: 0,
+        );
+        _loadingMetrics = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loadingMetrics = false;
+      });
+    }
+  }
+
+  _ViewerRateEstimate _estimateRate({
+    required List<double> values,
+    required double sampleRate,
+    required double minimumDistanceSeconds,
+    required double thresholdMultiplier,
+    required int smoothingRadius,
+  }) {
+    if (values.length < 6 || sampleRate <= 0) {
+      return const _ViewerRateEstimate(
+        rateBpm: null,
+        intervalMs: null,
+      );
+    }
+
+    final smoothed = _smoothValues(
+      values,
+      radius: smoothingRadius,
+    );
+
+    final mean =
+        smoothed.reduce((a, b) => a + b) /
+        smoothed.length;
+
+    var variance = 0.0;
+
+    for (final value in smoothed) {
+      final difference = value - mean;
+      variance += difference * difference;
+    }
+
+    variance /= smoothed.length;
+    final standardDeviation = math.sqrt(variance);
+
+    if (!standardDeviation.isFinite ||
+        standardDeviation <= 0) {
+      return const _ViewerRateEstimate(
+        rateBpm: null,
+        intervalMs: null,
+      );
+    }
+
+    final threshold =
+        mean + standardDeviation * thresholdMultiplier;
+
+    final minimumDistanceSamples = math.max(
+      1,
+      (minimumDistanceSeconds * sampleRate).round(),
+    );
+
+    final peaks = <int>[];
+    var lastPeak = -minimumDistanceSamples;
+
+    for (int i = 1; i < smoothed.length - 1; i++) {
+      final current = smoothed[i];
+
+      if (current < threshold ||
+          current < smoothed[i - 1] ||
+          current < smoothed[i + 1]) {
+        continue;
+      }
+
+      if (i - lastPeak < minimumDistanceSamples) {
+        if (peaks.isNotEmpty &&
+            current > smoothed[peaks.last]) {
+          peaks[peaks.length - 1] = i;
+          lastPeak = i;
+        }
+
+        continue;
+      }
+
+      peaks.add(i);
+      lastPeak = i;
+    }
+
+    if (peaks.length < 2) {
+      return const _ViewerRateEstimate(
+        rateBpm: null,
+        intervalMs: null,
+      );
+    }
+
+    var intervalSumSeconds = 0.0;
+    var intervalCount = 0;
+
+    for (int i = 1; i < peaks.length; i++) {
+      final delta = peaks[i] - peaks[i - 1];
+
+      if (delta <= 0) {
+        continue;
+      }
+
+      intervalSumSeconds += delta / sampleRate;
+      intervalCount++;
+    }
+
+    if (intervalCount == 0) {
+      return const _ViewerRateEstimate(
+        rateBpm: null,
+        intervalMs: null,
+      );
+    }
+
+    final averageIntervalSeconds =
+        intervalSumSeconds / intervalCount;
+
+    if (!averageIntervalSeconds.isFinite ||
+        averageIntervalSeconds <= 0) {
+      return const _ViewerRateEstimate(
+        rateBpm: null,
+        intervalMs: null,
+      );
+    }
+
+    return _ViewerRateEstimate(
+      rateBpm: 60.0 / averageIntervalSeconds,
+      intervalMs: averageIntervalSeconds * 1000,
+    );
+  }
+
+  List<double> _smoothValues(
+    List<double> values, {
+    required int radius,
+  }) {
+    if (radius <= 0 || values.length < 3) {
+      return List<double>.from(values);
+    }
+
+    final output = List<double>.filled(
+      values.length,
+      0,
+      growable: false,
+    );
+
+    final prefix = List<double>.filled(
+      values.length + 1,
+      0,
+      growable: false,
+    );
+
+    for (int i = 0; i < values.length; i++) {
+      prefix[i + 1] = prefix[i] + values[i];
+    }
+
+    for (int i = 0; i < values.length; i++) {
+      final start = math.max(0, i - radius);
+      final end = math.min(
+        values.length - 1,
+        i + radius,
+      );
+
+      output[i] =
+          (prefix[end + 1] - prefix[start]) /
+          (end - start + 1);
+    }
+
+    return output;
+  }
+
+  Future<void> _loadVisibleWindow() async {
+    final serial = ++_windowRequestSerial;
+
+    if (_timelineDurationUs <= 0) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _samples = const [];
+        _gaps = const [];
+        _loadingWindow = false;
+      });
+
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingWindow = true;
+      });
+    }
+
+    try {
+      final startUs = _windowStartUs;
+      final endUs = _windowEndUs;
+
+      final results = await Future.wait([
+        _database.getSignalChunksInRange(
+          recordingId: widget.recordingId,
+          startElapsedUs: startUs,
+          endElapsedUs: endUs,
+        ),
+        _database.getGapsInRange(
+          recordingId: widget.recordingId,
+          startElapsedUs: startUs,
+          endElapsedUs: endUs,
+        ),
+      ]);
+
+      if (!mounted || serial != _windowRequestSerial) {
+        return;
+      }
+
+      final chunks =
+          results[0] as List<Map<String, Object?>>;
+      final gapRows =
+          results[1] as List<Map<String, Object?>>;
+
+      final decoded = _decodeChunks(
+        chunks,
+        startUs,
+        endUs,
+      );
+
+      final gaps = gapRows.map(_RecordingGap.fromRow).toList(
+            growable: false,
+          );
 
       setState(() {
         _samples = decoded;
         _gaps = gaps;
-        _loadingSignal = false;
+        _loadingWindow = false;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || serial != _windowRequestSerial) {
         return;
       }
 
       setState(() {
-        _loadingSignal = false;
+        _loadingWindow = false;
         _error = error.toString();
       });
     }
   }
 
-  Future<void> _chooseInterval() async {
-    if (_timelineUs <= 0) {
+  List<_DecodedSample> _decodeChunks(
+    List<Map<String, Object?>> chunks,
+    int visibleStartUs,
+    int visibleEndUs,
+  ) {
+    final result = <_DecodedSample>[];
+    final samplePeriodUs = 1000000.0 / _sampleRate;
+
+    for (final chunk in chunks) {
+      final encodingVersion =
+          chunk['encoding_version'] as int? ?? 1;
+
+      if (encodingVersion != 1) {
+        continue;
+      }
+
+      final sampleCount =
+          chunk['sample_count'] as int? ?? 0;
+
+      final chunkStartUs =
+          chunk['start_elapsed_us'] as int? ?? 0;
+
+      final raw = chunk['signal_data'];
+
+      final bytes = switch (raw) {
+        Uint8List value => value,
+        List<int> value => Uint8List.fromList(value),
+        _ => null,
+      };
+
+      if (bytes == null ||
+          sampleCount <= 0 ||
+          bytes.length < sampleCount * 8) {
+        continue;
+      }
+
+      final data = ByteData.sublistView(bytes);
+
+      for (int index = 0; index < sampleCount; index++) {
+        final elapsedUs =
+            chunkStartUs + (index * samplePeriodUs).round();
+
+        if (elapsedUs < visibleStartUs) {
+          continue;
+        }
+
+        if (elapsedUs >= visibleEndUs) {
+          break;
+        }
+
+        final offset = index * 8;
+
+        final ecg = data.getInt32(
+          offset,
+          Endian.little,
+        );
+
+        final respiration = data.getInt32(
+          offset + 4,
+          Endian.little,
+        );
+
+        result.add(
+          _DecodedSample(
+            elapsedUs: elapsedUs,
+            ecg: ecg.toDouble(),
+            respiration: respiration.toDouble(),
+          ),
+        );
+      }
+    }
+
+    return result;
+  }
+
+  void _scheduleWindowLoad() {
+    _windowLoadDebounce?.cancel();
+
+    _windowLoadDebounce = Timer(
+      const Duration(milliseconds: 120),
+      _loadVisibleWindow,
+    );
+  }
+
+  void _onScaleStart(
+    ScaleStartDetails details,
+    double width,
+  ) {
+    _gestureWidth = math.max(width, 1.0);
+    _gestureStartWindowUs = _windowStartUs;
+    _gestureStartDurationUs = _windowDurationUs;
+    _gestureStartFocalX = details.localFocalPoint.dx.clamp(
+      0.0,
+      _gestureWidth,
+    );
+
+    final fraction =
+        _gestureStartFocalX / _gestureWidth;
+
+    _gestureAnchorTimeUs = (
+      _gestureStartWindowUs +
+      fraction * _gestureStartDurationUs
+    ).round();
+  }
+
+  void _onScaleUpdate(
+    ScaleUpdateDetails details,
+  ) {
+    if (_timelineDurationUs <= 0) {
       return;
     }
 
-    final selected = await showDialog<_SelectedInterval>(
-      context: context,
-      builder: (dialogContext) {
-        return _IntervalDialog(
-          timelineUs: _timelineUs,
-          startUs: _intervalStartUs,
-          endUs: math.min(_intervalEndUs, _timelineUs),
-          maximumIntervalUs: _maximumIntervalUs,
-        );
-      },
+    final maxWindow = math.max(
+      _minimumWindowUs,
+      math.min(
+        _timelineDurationUs,
+        _maximumDetailedWindowUs,
+      ),
     );
 
-    if (selected == null || !mounted) {
+    final newDuration = (
+      _gestureStartDurationUs /
+      math.max(details.scale, 0.01)
+    ).round().clamp(
+          _minimumWindowUs,
+          maxWindow,
+        );
+
+    final currentFocalX =
+        details.localFocalPoint.dx.clamp(
+      0.0,
+      _gestureWidth,
+    );
+
+    final focalFraction =
+        currentFocalX / _gestureWidth;
+
+    var newStart = (
+      _gestureAnchorTimeUs -
+      focalFraction * newDuration
+    ).round();
+
+    newStart = _clampWindowStart(
+      newStart,
+      newDuration,
+    );
+
+    if (newStart == _windowStartUs &&
+        newDuration == _windowDurationUs) {
       return;
     }
 
     setState(() {
-      _intervalStartUs = selected.startUs;
-      _intervalEndUs = selected.endUs;
+      _windowStartUs = newStart;
+      _windowDurationUs = newDuration;
     });
 
-    await _loadSignalInterval();
+    _scheduleWindowLoad();
+  }
+
+  int _clampWindowStart(
+    int startUs,
+    int durationUs,
+  ) {
+    final maximumStart = math.max(
+      0,
+      _timelineDurationUs - durationUs,
+    );
+
+    return startUs.clamp(
+      0,
+      maximumStart,
+    );
+  }
+
+  void _zoomBy(double factor) {
+    if (_timelineDurationUs <= 0) {
+      return;
+    }
+
+    final maxWindow = math.max(
+      _minimumWindowUs,
+      math.min(
+        _timelineDurationUs,
+        _maximumDetailedWindowUs,
+      ),
+    );
+
+    final center =
+        _windowStartUs + _windowDurationUs / 2;
+
+    final newDuration = (
+      _windowDurationUs * factor
+    ).round().clamp(
+          _minimumWindowUs,
+          maxWindow,
+        );
+
+    final newStart = _clampWindowStart(
+      (center - newDuration / 2).round(),
+      newDuration,
+    );
+
+    setState(() {
+      _windowDurationUs = newDuration;
+      _windowStartUs = newStart;
+    });
+
+    _scheduleWindowLoad();
+  }
+
+  void _resetWindow() {
+    if (_timelineDurationUs <= 0) {
+      return;
+    }
+
+    setState(() {
+      _windowStartUs =
+          _clampWindowStart(
+        _intervalBaseStartUs,
+        _intervalBaseDurationUs,
+      );
+      _windowDurationUs =
+          _intervalBaseDurationUs.clamp(
+        _minimumWindowUs,
+        math.min(
+          _timelineDurationUs,
+          _maximumDetailedWindowUs,
+        ),
+      );
+    });
+
+    _scheduleWindowLoad();
+  }
+
+  Future<void> _chooseInterval() async {
+    if (_timelineDurationUs <= 0) {
+      return;
+    }
+
+    final selected =
+        await showDialog<_SelectedInterval>(
+      context: context,
+      builder: (dialogContext) {
+        return _IntervalDialog(
+          timelineUs:
+              _timelineDurationUs,
+          startUs:
+              _windowStartUs,
+          endUs:
+              _windowEndUs,
+          maximumIntervalUs:
+              _maximumDetailedWindowUs,
+        );
+      },
+    );
+
+    if (selected == null ||
+        !mounted) {
+      return;
+    }
+
+    final duration =
+        selected.endUs -
+        selected.startUs;
+
+    setState(() {
+      _intervalBaseStartUs =
+          selected.startUs;
+      _intervalBaseDurationUs =
+          duration;
+      _windowStartUs =
+          selected.startUs;
+      _windowDurationUs =
+          duration;
+    });
+
+    await _loadVisibleWindow();
+  }
+
+  Rect? _shareOrigin() {
+    final box =
+        context.findRenderObject()
+            as RenderBox?;
+
+    if (box == null ||
+        !box.hasSize) {
+      return null;
+    }
+
+    return box.localToGlobal(
+          Offset.zero,
+        ) &
+        box.size;
+  }
+
+  void _jumpToTimelineFraction(double fraction) {
+    if (_timelineDurationUs <= 0) {
+      return;
+    }
+
+    final targetUs =
+        (_timelineDurationUs * fraction).round();
+
+    final newStart = _clampWindowStart(
+      targetUs - _windowDurationUs ~/ 2,
+      _windowDurationUs,
+    );
+
+    setState(() {
+      _windowStartUs = newStart;
+    });
+
+    _scheduleWindowLoad();
+  }
+
+
+  Future<void> _runViewerAction(
+    Future<void> Function() action, {
+    required String successMessage,
+  }) async {
+    if (_workingAction) {
+      return;
+    }
+
+    setState(() {
+      _workingAction = true;
+    });
+
+    try {
+      await action();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(successMessage),
+          ),
+        );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              context
+                  .read<LanguageProvider>()
+                  .translate(
+                    "action_failed",
+                    <String, Object?>{
+                      "error": error,
+                    },
+                  ),
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _workingAction = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _exportApex() async {
+    final language =
+        context.read<LanguageProvider>();
+
+    await _runViewerAction(
+      () async {
+        await RecordingExportService.instance.export(
+          recordingId: widget.recordingId,
+          format: RecordingExportFormat.apex,
+          sharePositionOrigin:
+              _shareOrigin(),
+        );
+      },
+      successMessage:
+          language.translate(
+        "apex_export_ready",
+      ),
+    );
+  }
+
+  Future<void> _exportCsv() async {
+    final language =
+        context.read<LanguageProvider>();
+
+    await _runViewerAction(
+      () async {
+        await RecordingExportService.instance.export(
+          recordingId: widget.recordingId,
+          format: RecordingExportFormat.csv,
+          sharePositionOrigin:
+              _shareOrigin(),
+        );
+      },
+      successMessage:
+          language.translate(
+        "csv_export_ready",
+      ),
+    );
+  }
+
+  Future<void> _sharePdfReport() async {
+    final language =
+        context.read<LanguageProvider>();
+
+    await _runViewerAction(
+      () async {
+        await RecordingReportService.instance.shareReport(
+          recordingId: widget.recordingId,
+          languageCode:
+              language.currentLang,
+          sharePositionOrigin:
+              _shareOrigin(),
+        );
+      },
+      successMessage:
+          language.translate(
+        "pdf_ready",
+      ),
+    );
+  }
+
+  Future<void> _printPdfReport() async {
+    await _runViewerAction(
+      () async {
+        final language =
+            context.read<LanguageProvider>();
+
+        await RecordingReportService.instance.printReport(
+          recordingId: widget.recordingId,
+          languageCode:
+              language.currentLang,
+        );
+      },
+      successMessage:
+          context
+              .read<LanguageProvider>()
+              .translate(
+                "print_opened",
+              ),
+    );
+  }
+
+  Future<void> _showViewerActions() async {
+    final language =
+        context.read<LanguageProvider>();
+
+    final action =
+        await showModalBottomSheet<
+            _ViewerAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding:
+                const EdgeInsets.fromLTRB(
+              20,
+              2,
+              20,
+              18,
+            ),
+            child: Column(
+              mainAxisSize:
+                  MainAxisSize.min,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .stretch,
+              children: [
+                Text(
+                  language.translate(
+                    "recording_actions",
+                  ),
+                  style:
+                      Theme.of(
+                    sheetContext,
+                  )
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                          ),
+                ),
+                const SizedBox(
+                  height: 8,
+                ),
+                _ViewerActionRow(
+                  label:
+                      language.translate(
+                    "generate_share_pdf",
+                  ),
+                  onTap: () {
+                    Navigator.pop(
+                      sheetContext,
+                      _ViewerAction
+                          .sharePdf,
+                    );
+                  },
+                ),
+                _ViewerActionRow(
+                  label:
+                      language.translate(
+                    "print_pdf",
+                  ),
+                  onTap: () {
+                    Navigator.pop(
+                      sheetContext,
+                      _ViewerAction
+                          .printPdf,
+                    );
+                  },
+                ),
+                _ViewerActionRow(
+                  label:
+                      language.translate(
+                    "export_apex",
+                  ),
+                  onTap: () {
+                    Navigator.pop(
+                      sheetContext,
+                      _ViewerAction
+                          .exportApex,
+                    );
+                  },
+                ),
+                _ViewerActionRow(
+                  label:
+                      language.translate(
+                    "export_csv",
+                  ),
+                  onTap: () {
+                    Navigator.pop(
+                      sheetContext,
+                      _ViewerAction
+                          .exportCsv,
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (action == null ||
+        !mounted) {
+      return;
+    }
+
+    switch (action) {
+      case _ViewerAction.exportApex:
+        await _exportApex();
+        break;
+      case _ViewerAction.exportCsv:
+        await _exportCsv();
+        break;
+      case _ViewerAction.sharePdf:
+        await _sharePdfReport();
+        break;
+      case _ViewerAction.printPdf:
+        await _printPdfReport();
+        break;
+    }
   }
 
   Future<void> _editDetails() async {
@@ -290,32 +1014,51 @@ class _RecordingViewerState extends State<RecordingViewer> {
     final nameController = TextEditingController(
       text: recording['name'] as String? ?? '',
     );
+
     final notesController = TextEditingController(
       text: recording['notes'] as String? ?? '',
     );
+
+    final language =
+        context.read<LanguageProvider>();
 
     final save = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Edit recording'),
-          content: SizedBox(
-            width: 380,
+          title: Text(
+            language.translate(
+              "edit_recording",
+            ),
+          ),
+          content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: nameController,
-                  maxLines: 1,
-                  decoration: const InputDecoration(labelText: 'Name'),
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText:
+                        language.translate(
+                      "recording_name",
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: notesController,
                   minLines: 3,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
+                  maxLines: 6,
+                  decoration: InputDecoration(
+                    labelText:
+                        language.translate(
+                      "notes",
+                    ),
+                    hintText:
+                        language.translate(
+                      "optional",
+                    ),
                     alignLabelWithHint: true,
                   ),
                 ),
@@ -324,587 +1067,676 @@ class _RecordingViewerState extends State<RecordingViewer> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (save == true) {
-      final name = nameController.text.trim();
-      final notes = notesController.text.trim();
-
-      if (name.isNotEmpty) {
-        await _database.updateRecordingDetails(
-          recordingId: widget.recordingId,
-          name: name,
-          notes: notes.isEmpty ? null : notes,
-          replaceNotes: true,
-        );
-        await _reloadMetadata();
-      }
-    }
-
-    nameController.dispose();
-    notesController.dispose();
-  }
-
-  Future<void> _reloadMetadata() async {
-    final recording = await _database.getRecordingById(widget.recordingId);
-
-    if (!mounted || recording == null) {
-      return;
-    }
-
-    setState(() {
-      _recording = recording;
-    });
-  }
-
-  Rect? _shareOrigin() {
-    final box = context.findRenderObject() as RenderBox?;
-
-    if (box == null) {
-      return null;
-    }
-
-    return box.localToGlobal(Offset.zero) & box.size;
-  }
-
-  Future<void> _runAction(
-    Future<void> Function() action,
-    String success,
-  ) async {
-    if (_working) {
-      return;
-    }
-
-    setState(() {
-      _working = true;
-    });
-
-    try {
-      await action();
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(success)));
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('Action failed: $error')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _working = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _showActions() async {
-    final action = await showModalBottomSheet<_ViewerAction>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Recording actions',
-                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _ActionRow(
-                  label: 'Generate / Share PDF',
-                  onTap: () => Navigator.pop(sheetContext, _ViewerAction.pdf),
-                ),
-                _ActionRow(
-                  label: 'Print PDF',
-                  onTap: () =>
-                      Navigator.pop(sheetContext, _ViewerAction.printPdf),
-                ),
-                _ActionRow(
-                  label: 'Export ApexCardio file (.apex)',
-                  onTap: () => Navigator.pop(sheetContext, _ViewerAction.apex),
-                ),
-                _ActionRow(
-                  label: 'Export CSV',
-                  onTap: () => Navigator.pop(sheetContext, _ViewerAction.csv),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (action == null || !mounted) {
-      return;
-    }
-
-    switch (action) {
-      case _ViewerAction.pdf:
-        await _runAction(
-          () => RecordingReportService.instance.shareReport(
-            recordingId: widget.recordingId,
-            sharePositionOrigin: _shareOrigin(),
-          ),
-          'PDF report ready',
-        );
-        break;
-      case _ViewerAction.printPdf:
-        await _runAction(
-          () => RecordingReportService.instance.printReport(
-            recordingId: widget.recordingId,
-          ),
-          'Print dialog opened',
-        );
-        break;
-      case _ViewerAction.apex:
-        await _runAction(
-          () => RecordingExportService.instance.export(
-            recordingId: widget.recordingId,
-            format: RecordingExportFormat.apex,
-            sharePositionOrigin: _shareOrigin(),
-          ),
-          'ApexCardio export ready',
-        );
-        break;
-      case _ViewerAction.csv:
-        await _runAction(
-          () => RecordingExportService.instance.export(
-            recordingId: widget.recordingId,
-            format: RecordingExportFormat.csv,
-            sharePositionOrigin: _shareOrigin(),
-          ),
-          'CSV export ready',
-        );
-        break;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final recording = _recording;
-
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 16,
-        title: Text(
-          recording?['name'] as String? ?? 'Recording',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          if (_working)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: Text(
+                language.translate(
+                  "cancel",
                 ),
               ),
             ),
-          TextButton(
-            onPressed: recording == null || _working ? null : _editDetails,
-            child: const Text('Edit'),
-          ),
-          TextButton(
-            onPressed: recording == null || _working ? null : _showActions,
-            child: const Text('More'),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : recording == null
-          ? Center(child: Text(_error ?? 'Recording not found'))
-          : _buildBody(context, recording),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              child: Text(
+                language.translate(
+                  "save",
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (save != true) {
+      nameController.dispose();
+      notesController.dispose();
+      return;
+    }
+
+    final cleanedName = nameController.text.trim();
+    final notes = notesController.text.trim();
+
+    nameController.dispose();
+    notesController.dispose();
+
+    if (cleanedName.isEmpty) {
+      return;
+    }
+
+    await _database.updateRecordingDetails(
+      recordingId: widget.recordingId,
+      name: cleanedName,
+      notes: notes.isEmpty ? null : notes,
+      replaceNotes: true,
+    );
+
+    await _loadRecording();
+  }
+
+  String _formatDurationUs(int microseconds) {
+    return _formatDuration(
+      Duration(microseconds: microseconds),
     );
   }
 
-  Widget _buildBody(BuildContext context, Map<String, Object?> recording) {
-    final scheme = Theme.of(context).colorScheme;
-    final summary = _summary;
-    final sampleCount = recording['recorded_sample_count'] as int? ?? 0;
-    final measuredUs = _sampleRate <= 0
-        ? 0
-        : (sampleCount / _sampleRate * 1000000).round();
-    final notes = recording['notes'] as String?;
-    final startedAt = recording['started_at_ms'] as int? ?? 0;
-    final endedAt = recording['ended_at_ms'] as int?;
-    final status = recording['status'] as String? ?? 'completed';
-    final device = recording['device_name'] as String?;
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: [
-          _VitalsHeader(
-            heartRate: summary?.averageHeartRateBpm,
-            respirationRate: summary?.averageRespirationRateBrpm,
-          ),
-          const SizedBox(height: 18),
-          Divider(height: 1, color: scheme.outlineVariant),
-          const SizedBox(height: 14),
-          _IntervalBar(
-            start: _formatClock(_intervalStartUs),
-            end: _formatClock(math.min(_intervalEndUs, _timelineUs)),
-            onChange: _chooseInterval,
-          ),
-          const SizedBox(height: 18),
-          _SignalSection(
-            title: 'ECG',
-            range: _formatIntervalLength(),
-            height: 230,
-            loading: _loadingSignal,
-            painter: _SignalPainter(
-              samples: _samples,
-              gaps: _gaps,
-              startUs: _intervalStartUs,
-              endUs: math.min(_intervalEndUs, _timelineUs),
-              channel: _SignalChannel.ecg,
-              lineColor: scheme.primary,
-              gridColor: scheme.outlineVariant,
-              gapColor: scheme.error.withValues(alpha: 0.09),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _SignalSection(
-            title: 'Respiration',
-            range: _formatIntervalLength(),
-            height: 180,
-            loading: _loadingSignal,
-            painter: _SignalPainter(
-              samples: _samples,
-              gaps: _gaps,
-              startUs: _intervalStartUs,
-              endUs: math.min(_intervalEndUs, _timelineUs),
-              channel: _SignalChannel.respiration,
-              lineColor: scheme.tertiary,
-              gridColor: scheme.outlineVariant,
-              gapColor: scheme.error.withValues(alpha: 0.09),
-            ),
-          ),
-          const SizedBox(height: 28),
-          Text(
-            'Details',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            label: 'Average R-R interval',
-            value: summary?.averageRrMs == null
-                ? '--'
-                : '${summary!.averageRrMs!.toStringAsFixed(0)} ms',
-          ),
-          _DetailRow(
-            label: 'Average breath interval',
-            value: summary?.averageBreathIntervalMs == null
-                ? '--'
-                : '${summary!.averageBreathIntervalMs!.toStringAsFixed(0)} ms',
-          ),
-          _DetailRow(
-            label: 'Sample rate',
-            value: '${_sampleRate.toStringAsFixed(0)} Hz',
-          ),
-          _DetailRow(label: 'Samples', value: _formatNumber(sampleCount)),
-          _DetailRow(
-            label: 'Measured signal',
-            value: _formatDuration(measuredUs),
-          ),
-          _DetailRow(label: 'Timeline', value: _formatDuration(_timelineUs)),
-          _DetailRow(
-            label: 'Gaps',
-            value: summary == null
-                ? '--'
-                : '${summary.gapCount} · ${_formatDuration(summary.gapDurationUs)}',
-          ),
-          _DetailRow(label: 'Started', value: _formatDateTime(startedAt)),
-          _DetailRow(
-            label: 'Ended',
-            value: endedAt == null ? '--' : _formatDateTime(endedAt),
-          ),
-          _DetailRow(label: 'Status', value: _titleCase(status)),
-          _DetailRow(
-            label: 'Device',
-            value: device?.trim().isEmpty == false ? device! : '--',
-          ),
-          if (notes != null && notes.trim().isNotEmpty) ...[
-            const SizedBox(height: 18),
-            Text(
-              'Notes',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              notes,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 18),
-            Text(
-              _error!,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: scheme.error),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Text(
-            'Average rates are derived from representative signal windows across the recording and are not a clinical diagnosis.',
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatIntervalLength() {
-    final end = math.min(_intervalEndUs, _timelineUs);
-    final duration = math.max(0, end - _intervalStartUs);
-    return _formatDuration(duration);
-  }
-
-  String _formatClock(int microseconds) {
-    final totalSeconds = microseconds ~/ 1000000;
+  String _formatDuration(Duration duration) {
+    final totalSeconds = duration.inSeconds;
     final days = totalSeconds ~/ 86400;
     final hours = (totalSeconds % 86400) ~/ 3600;
     final minutes = (totalSeconds % 3600) ~/ 60;
     final seconds = totalSeconds % 60;
-    final prefix = days > 0 ? '${days}d ' : '';
-    return '$prefix${_two(hours)}:${_two(minutes)}:${_two(seconds)}';
-  }
 
-  String _formatDuration(int microseconds) {
-    return _formatClock(microseconds);
+    if (days > 0) {
+      return '${days}d ${_two(hours)}:${_two(minutes)}:${_two(seconds)}';
+    }
+
+    if (hours > 0) {
+      return '${_two(hours)}:${_two(minutes)}:${_two(seconds)}';
+    }
+
+    return '${_two(minutes)}:${_two(seconds)}';
   }
 
   String _formatDateTime(int milliseconds) {
-    final date = DateTime.fromMillisecondsSinceEpoch(milliseconds);
+    final date = DateTime.fromMillisecondsSinceEpoch(
+      milliseconds,
+    );
+
     return '${date.year}-${_two(date.month)}-${_two(date.day)} '
-        '${_two(date.hour)}:${_two(date.minute)}';
+        '${_two(date.hour)}:${_two(date.minute)}:${_two(date.second)}';
   }
 
-  String _formatNumber(int value) {
-    if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(2)}M';
-    }
-    if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(1)}K';
-    }
-    return '$value';
+  String _two(int value) {
+    return value.toString().padLeft(2, '0');
   }
 
-  String _titleCase(String value) {
-    if (value.isEmpty) {
-      return value;
-    }
-    return '${value[0].toUpperCase()}${value.substring(1).toLowerCase()}';
+  @override
+  Widget build(BuildContext context) {
+    final recording =
+        _recording;
+    final language =
+        context.watch<LanguageProvider>();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          recording?['name'] as String? ??
+              language.translate(
+                "recording",
+              ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          if (_workingAction)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 19,
+                  height: 19,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            ),
+          SizedBox(
+            width: 74,
+            child: TextButton(
+              onPressed:
+                  recording == null ||
+                          _workingAction
+                      ? null
+                      : _editDetails,
+              child: FittedBox(
+                fit:
+                    BoxFit.scaleDown,
+                child: Text(
+                  language.translate(
+                    "edit",
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 68,
+            child: TextButton(
+              onPressed:
+                  recording == null ||
+                          _workingAction
+                      ? null
+                      : _showViewerActions,
+              child: FittedBox(
+                fit:
+                    BoxFit.scaleDown,
+                child: Text(
+                  language.translate(
+                    "more",
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+        ],
+      ),
+      body: _loadingRecording
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : _error != null && recording == null
+              ? _ErrorBody(
+                  message: _error!,
+                  onRetry: _loadRecording,
+                )
+              : recording == null
+                  ? Center(
+                      child: Text(
+                        language.translate(
+                          "recording_not_found",
+                        ),
+                      ),
+                    )
+                  : _buildContent(context, recording),
+    );
   }
 
-  String _two(int value) => value.toString().padLeft(2, '0');
+  Widget _buildContent(
+    BuildContext context,
+    Map<String, Object?> recording,
+  ) {
+    final scheme =
+        Theme.of(context).colorScheme;
+    final language =
+        context.watch<LanguageProvider>();
+
+    final startedAtMs =
+        recording['started_at_ms']
+            as int? ??
+        0;
+    final timelineUs =
+        recording['timeline_duration_us']
+            as int? ??
+        0;
+    final sampleCount =
+        recording['recorded_sample_count']
+            as int? ??
+        0;
+    final status =
+        recording['status'] as String? ??
+        'completed';
+    final notes =
+        recording['notes'] as String?;
+    final deviceName =
+        recording['device_name']
+            as String?;
+
+    final measuredDuration =
+        Duration(
+      microseconds: (
+        sampleCount /
+        _sampleRate *
+        1000000
+      ).round(),
+    );
+
+    return RefreshIndicator(
+      onRefresh: _loadRecording,
+      child: ListView(
+        physics:
+            const AlwaysScrollableScrollPhysics(),
+        padding:
+            const EdgeInsets.fromLTRB(
+          16,
+          12,
+          16,
+          28,
+        ),
+        children: [
+          _VitalsCard(
+            metrics: _metrics,
+            loading:
+                _loadingMetrics,
+            averageLabel:
+                language.translate(
+              "average",
+            ),
+          ),
+          const SizedBox(height: 16),
+          _IntervalSelector(
+            title:
+                language.translate(
+              "interval",
+            ),
+            start:
+                _formatDurationUs(
+              _windowStartUs,
+            ),
+            end:
+                _formatDurationUs(
+              _windowEndUs,
+            ),
+            changeLabel:
+                language.translate(
+              "change",
+            ),
+            onChange:
+                _chooseInterval,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text(
+                language.translate(
+                  "signal_viewer",
+                ),
+                style:
+                    Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(
+                          fontWeight:
+                              FontWeight
+                                  .w600,
+                        ),
+              ),
+              const Spacer(),
+              if (_loadingWindow)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child:
+                      CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SignalViewer(
+            samples: _samples,
+            gaps: _gaps,
+            windowStartUs:
+                _windowStartUs,
+            windowEndUs:
+                _windowEndUs,
+            onScaleStart:
+                _onScaleStart,
+            onScaleUpdate:
+                _onScaleUpdate,
+            respirationTitle:
+                language.translate(
+              "respiration",
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 46,
+                child:
+                    OutlinedButton(
+                  onPressed: () {
+                    _zoomBy(0.5);
+                  },
+                  child:
+                      const FittedBox(
+                    fit:
+                        BoxFit.scaleDown,
+                    child: Text('+'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 46,
+                child:
+                    OutlinedButton(
+                  onPressed: () {
+                    _zoomBy(2.0);
+                  },
+                  child:
+                      const FittedBox(
+                    fit:
+                        BoxFit.scaleDown,
+                    child: Text('−'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: TextButton(
+                  onPressed:
+                      _resetWindow,
+                  child: FittedBox(
+                    fit:
+                        BoxFit.scaleDown,
+                    child: Text(
+                      language.translate(
+                        "reset",
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  language.translate(
+                    "samples",
+                    <String, Object?>{
+                      "count":
+                          _samples.length,
+                    },
+                  ),
+                  maxLines: 1,
+                  overflow:
+                      TextOverflow
+                          .ellipsis,
+                  textAlign:
+                      TextAlign.right,
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(
+                            color: scheme
+                                .onSurfaceVariant,
+                          ),
+                ),
+              ),
+            ],
+          ),
+          if (_gaps.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Text(
+              language.translate(
+                "gaps_visible_range",
+              ),
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                      ),
+            ),
+            const SizedBox(height: 8),
+            ..._gaps.map(
+              (gap) => Padding(
+                padding:
+                    const EdgeInsets.only(
+                  bottom: 8,
+                ),
+                child: _GapTile(
+                  gap: gap,
+                  formatDurationUs:
+                      _formatDurationUs,
+                  gapLabel:
+                      language.translate(
+                    "gap",
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
+          _TechnicalDetailsCard(
+            title:
+                language.translate(
+              "technical_details",
+            ),
+            rrLabel:
+                language.translate(
+              "rr_interval",
+            ),
+            breathLabel:
+                language.translate(
+              "breath_interval",
+            ),
+            sampleRateLabel:
+                language.translate(
+              "sample_rate",
+            ),
+            samplesLabel:
+                language.translate(
+              "samples_label",
+            ),
+            coverageLabel:
+                language.translate(
+              "signal_coverage",
+            ),
+            measuredLabel:
+                language.translate(
+              "measured_label",
+            ),
+            timelineLabel:
+                language.translate(
+              "timeline",
+            ),
+            startedLabel:
+                language.translate(
+              "started",
+            ),
+            statusLabel:
+                language.translate(
+              "status",
+            ),
+            deviceLabel:
+                language.translate(
+              "device",
+            ),
+            notesLabel:
+                language.translate(
+              "notes",
+            ),
+            disclaimer:
+                language.translate(
+              "rate_disclaimer",
+            ),
+            rrMs: _metrics
+                ?.estimatedMeanRrMs,
+            breathMs: _metrics
+                ?.estimatedMeanBreathMs,
+            sampleRate:
+                _sampleRate,
+            sampleCount:
+                sampleCount,
+            timelineDurationUs:
+                timelineUs,
+            measuredDuration:
+                _formatDuration(
+              measuredDuration,
+            ),
+            timelineDuration:
+                _formatDurationUs(
+              timelineUs,
+            ),
+            started:
+                _formatDateTime(
+              startedAtMs,
+            ),
+            status:
+                _localizedStatus(
+              language,
+              status,
+            ),
+            device:
+                deviceName,
+            notes: notes,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding:
+                  const EdgeInsets.all(
+                12,
+              ),
+              decoration:
+                  BoxDecoration(
+                color:
+                    scheme.errorContainer,
+                borderRadius:
+                    BorderRadius.circular(
+                  12,
+                ),
+              ),
+              child: Text(
+                _error!,
+                style:
+                    Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(
+                          color: scheme
+                              .onErrorContainer,
+                        ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _localizedStatus(
+    LanguageProvider language,
+    String status,
+  ) {
+    switch (status) {
+      case 'recording':
+        return language.translate(
+          "recording",
+        );
+      case 'paused':
+        return language.translate(
+          "paused",
+        );
+      case 'interrupted':
+        return language.translate(
+          "interrupted",
+        );
+      default:
+        return language.translate(
+          "completed",
+        );
+    }
+  }
 }
 
-class _VitalsHeader extends StatelessWidget {
-  final double? heartRate;
-  final double? respirationRate;
+class _SignalViewer extends StatelessWidget {
+  final List<_DecodedSample> samples;
+  final List<_RecordingGap> gaps;
+  final int windowStartUs;
+  final int windowEndUs;
+  final void Function(
+    ScaleStartDetails details,
+    double width,
+  ) onScaleStart;
+  final void Function(
+    ScaleUpdateDetails details,
+  ) onScaleUpdate;
+  final String respirationTitle;
 
-  const _VitalsHeader({required this.heartRate, required this.respirationRate});
+  const _SignalViewer({
+    required this.samples,
+    required this.gaps,
+    required this.windowStartUs,
+    required this.windowEndUs,
+    required this.onScaleStart,
+    required this.onScaleUpdate,
+    required this.respirationTitle,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return SizedBox(
-      height: 82,
-      child: Row(
-        children: [
-          Expanded(
-            child: _Vital(
-              value: heartRate == null ? '--' : heartRate!.round().toString(),
-              unit: 'BPM',
-              label: 'Average',
-              accent: const Color(0xFFE74C4C),
-            ),
-          ),
-          Container(width: 1, height: 52, color: scheme.outlineVariant),
-          Expanded(
-            child: _Vital(
-              value: respirationRate == null
-                  ? '--'
-                  : respirationRate!.round().toString(),
-              unit: 'BRPM',
-              label: 'Average',
-              accent: scheme.primary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Vital extends StatelessWidget {
-  final String value;
-  final String unit;
-  final String label;
-  final Color accent;
-
-  const _Vital({
-    required this.value,
-    required this.unit,
-    required this.label,
-    required this.accent,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-
-    return Center(
-      child: SizedBox(
-        width: 145,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  margin: const EdgeInsets.only(right: 7, bottom: 6),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: accent,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(
-                    unit,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: muted),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: muted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _IntervalBar extends StatelessWidget {
-  final String start;
-  final String end;
-  final VoidCallback onChange;
-
-  const _IntervalBar({
-    required this.start,
-    required this.end,
-    required this.onChange,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-
-    return Row(
-      children: [
-        Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onScaleStart: (details) {
+            onScaleStart(
+              details,
+              constraints.maxWidth,
+            );
+          },
+          onScaleUpdate: onScaleUpdate,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Interval',
-                style: Theme.of(
-                  context,
-                ).textTheme.labelMedium?.copyWith(color: muted),
+              _GraphCard(
+                title: 'ECG',
+                child: CustomPaint(
+                  painter: _RecordingSignalPainter(
+                    samples: samples,
+                    gaps: gaps,
+                    windowStartUs: windowStartUs,
+                    windowEndUs: windowEndUs,
+                    channel: _SignalChannel.ecg,
+                    lineColor: scheme.primary,
+                    gridColor: scheme.outlineVariant,
+                    baselineColor: scheme.outlineVariant.withValues(
+                      alpha: 0.75,
+                    ),
+                    gapColor: scheme.error.withValues(
+                      alpha: 0.10,
+                    ),
+                  ),
+                  size: const Size(
+                    double.infinity,
+                    230,
+                  ),
+                ),
               ),
-              const SizedBox(height: 3),
-              Text(
-                '$start  →  $end',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              const SizedBox(height: 14),
+              _GraphCard(
+                title: respirationTitle,
+                child: CustomPaint(
+                  painter: _RecordingSignalPainter(
+                    samples: samples,
+                    gaps: gaps,
+                    windowStartUs: windowStartUs,
+                    windowEndUs: windowEndUs,
+                    channel: _SignalChannel.respiration,
+                    lineColor: scheme.tertiary,
+                    gridColor: scheme.outlineVariant,
+                    baselineColor: scheme.outlineVariant.withValues(
+                      alpha: 0.75,
+                    ),
+                    gapColor: scheme.error.withValues(
+                      alpha: 0.10,
+                    ),
+                  ),
+                  size: const Size(
+                    double.infinity,
+                    180,
+                  ),
+                ),
               ),
             ],
           ),
-        ),
-        TextButton(onPressed: onChange, child: const Text('Change')),
-      ],
+        );
+      },
     );
   }
 }
 
-class _SignalSection extends StatelessWidget {
+class _GraphCard extends StatelessWidget {
   final String title;
-  final String range;
-  final double height;
-  final bool loading;
-  final CustomPainter painter;
+  final Widget child;
 
-  const _SignalSection({
+  const _GraphCard({
     required this.title,
-    required this.range,
-    required this.height,
-    required this.loading,
-    required this.painter,
+    required this.child,
   });
 
   @override
@@ -914,126 +1746,35 @@ class _SignalSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const Spacer(),
-            Text(
-              range,
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          height: height,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainer,
-            border: Border.symmetric(
-              horizontal: BorderSide(color: scheme.outlineVariant),
-            ),
-          ),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CustomPaint(painter: painter),
-              if (loading)
-                ColoredBox(
-                  color: scheme.surface.withValues(alpha: 0.58),
-                  child: const Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
-            ],
           ),
+        ),
+        const SizedBox(height: 7),
+        Container(
+          width: double.infinity,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: scheme.outlineVariant,
+            ),
+            color: scheme.surfaceContainer,
+          ),
+          child: child,
         ),
       ],
     );
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _DetailRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 11),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.75),
-          ),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-          ),
-          const SizedBox(width: 20),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionRow extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _ActionRow({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-        ),
-        child: Text(label),
-      ),
-    );
-  }
-}
-
-class _IntervalDialog extends StatefulWidget {
+class _IntervalDialog
+    extends StatefulWidget {
   final int timelineUs;
   final int startUs;
   final int endUs;
@@ -1047,19 +1788,27 @@ class _IntervalDialog extends StatefulWidget {
   });
 
   @override
-  State<_IntervalDialog> createState() => _IntervalDialogState();
+  State<_IntervalDialog> createState() =>
+      _IntervalDialogState();
 }
 
-class _IntervalDialogState extends State<_IntervalDialog> {
+class _IntervalDialogState
+    extends State<_IntervalDialog> {
   late final _ClockControllers _start;
   late final _ClockControllers _end;
-  String? _error;
+  String? _errorKey;
 
   @override
   void initState() {
     super.initState();
-    _start = _ClockControllers.fromUs(widget.startUs);
-    _end = _ClockControllers.fromUs(widget.endUs);
+    _start =
+        _ClockControllers.fromUs(
+      widget.startUs,
+    );
+    _end =
+        _ClockControllers.fromUs(
+      widget.endUs,
+    );
   }
 
   @override
@@ -1070,136 +1819,324 @@ class _IntervalDialogState extends State<_IntervalDialog> {
   }
 
   void _apply() {
-    final startUs = _start.toUs();
-    final endUs = _end.toUs();
+    final startUs =
+        _start.toUs();
+    final endUs =
+        _end.toUs();
 
-    if (startUs < 0 || endUs <= startUs) {
+    if (startUs < 0 ||
+        endUs <= startUs) {
       setState(() {
-        _error = 'End must be after start.';
+        _errorKey =
+            "end_after_start";
       });
       return;
     }
 
-    if (endUs > widget.timelineUs) {
+    if (endUs >
+        widget.timelineUs) {
       setState(() {
-        _error = 'End is outside the recording.';
+        _errorKey =
+            "end_outside_recording";
       });
       return;
     }
 
-    if (endUs - startUs > widget.maximumIntervalUs) {
+    if (endUs - startUs >
+        widget.maximumIntervalUs) {
       setState(() {
-        _error = 'A graph interval can be at most 10 minutes.';
+        _errorKey =
+            "interval_too_long";
       });
       return;
     }
 
-    Navigator.pop(context, _SelectedInterval(startUs: startUs, endUs: endUs));
+    Navigator.pop(
+      context,
+      _SelectedInterval(
+        startUs: startUs,
+        endUs: endUs,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final language =
+        context.watch<LanguageProvider>();
+    final media =
+        MediaQuery.of(context);
+    final width =
+        (media.size.width - 32)
+            .clamp(0.0, 420.0)
+            .toDouble();
+
     return Dialog(
+      insetPadding:
+          const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 24,
+      ),
       child: SizedBox(
-        width: 390,
+        width: width,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Choose interval',
-                textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Recording length: ${_formatStatic(widget.timelineUs)} · max graph interval 10 min',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _ClockEditor(label: 'Start', controllers: _start),
-              const SizedBox(height: 18),
-              _ClockEditor(label: 'End', controllers: _end),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
+          padding:
+              const EdgeInsets.fromLTRB(
+            18,
+            18,
+            18,
+            14,
+          ),
+          child:
+              SingleChildScrollView(
+            child: Column(
+              mainAxisSize:
+                  MainAxisSize.min,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .stretch,
+              children: [
                 Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ],
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
+                  language.translate(
+                    "choose_interval",
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _apply,
-                      child: const Text('Show interval'),
+                  textAlign:
+                      TextAlign.center,
+                  maxLines: 2,
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                          ),
+                ),
+                const SizedBox(
+                  height: 6,
+                ),
+                Text(
+                  '${language.translate(
+                    "recording_length",
+                    <String, Object?>{
+                      "duration":
+                          _formatStatic(
+                        widget.timelineUs,
+                      ),
+                    },
+                  )}\n'
+                  '${language.translate(
+                    "max_graph_interval",
+                  )}',
+                  textAlign:
+                      TextAlign.center,
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: Theme.of(
+                              context,
+                            )
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                ),
+                const SizedBox(
+                  height: 18,
+                ),
+                _ClockEditor(
+                  label:
+                      language.translate(
+                    "start",
+                  ),
+                  controllers:
+                      _start,
+                ),
+                const SizedBox(
+                  height: 16,
+                ),
+                _ClockEditor(
+                  label:
+                      language.translate(
+                    "end",
+                  ),
+                  controllers:
+                      _end,
+                ),
+                if (_errorKey !=
+                    null) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  Text(
+                    language.translate(
+                      _errorKey!,
+                    ),
+                    textAlign:
+                        TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(
+                        context,
+                      )
+                          .colorScheme
+                          .error,
                     ),
                   ),
                 ],
-              ),
-            ],
+                const SizedBox(
+                  height: 16,
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child:
+                          TextButton(
+                        onPressed: () {
+                          Navigator.pop(
+                            context,
+                          );
+                        },
+                        child:
+                            FittedBox(
+                          fit:
+                              BoxFit
+                                  .scaleDown,
+                          child: Text(
+                            language
+                                .translate(
+                              "cancel",
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(
+                      width: 8,
+                    ),
+                    Expanded(
+                      child:
+                          FilledButton(
+                        onPressed:
+                            _apply,
+                        child:
+                            FittedBox(
+                          fit:
+                              BoxFit
+                                  .scaleDown,
+                          child: Text(
+                            language
+                                .translate(
+                              "show_interval",
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  static String _formatStatic(int microseconds) {
-    final seconds = microseconds ~/ 1000000;
-    final days = seconds ~/ 86400;
-    final hours = (seconds % 86400) ~/ 3600;
-    final minutes = (seconds % 3600) ~/ 60;
-    final secs = seconds % 60;
-    String two(int value) => value.toString().padLeft(2, '0');
+  static String _formatStatic(
+    int microseconds,
+  ) {
+    final seconds =
+        microseconds ~/ 1000000;
+    final days =
+        seconds ~/ 86400;
+    final hours =
+        (seconds % 86400) ~/ 3600;
+    final minutes =
+        (seconds % 3600) ~/ 60;
+    final secs =
+        seconds % 60;
+
+    String two(int value) =>
+        value
+            .toString()
+            .padLeft(2, '0');
+
     return days > 0
         ? '${days}d ${two(hours)}:${two(minutes)}:${two(secs)}'
         : '${two(hours)}:${two(minutes)}:${two(secs)}';
   }
 }
 
-class _ClockEditor extends StatelessWidget {
+class _ClockEditor
+    extends StatelessWidget {
   final String label;
   final _ClockControllers controllers;
 
-  const _ClockEditor({required this.label, required this.controllers});
+  const _ClockEditor({
+    required this.label,
+    required this.controllers,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final language =
+        context.watch<LanguageProvider>();
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          style:
+              Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(
+                    fontWeight:
+                        FontWeight.w600,
+                  ),
         ),
         const SizedBox(height: 8),
         Row(
           children: [
-            _ClockField(controller: controllers.days, label: 'Days'),
-            const SizedBox(width: 8),
-            _ClockField(controller: controllers.hours, label: 'Hours'),
-            const SizedBox(width: 8),
-            _ClockField(controller: controllers.minutes, label: 'Min'),
-            const SizedBox(width: 8),
-            _ClockField(controller: controllers.seconds, label: 'Sec'),
+            _ClockField(
+              controller:
+                  controllers.days,
+              label:
+                  language.translate(
+                "day_short",
+              ),
+            ),
+            const SizedBox(width: 6),
+            _ClockField(
+              controller:
+                  controllers.hours,
+              label:
+                  language.translate(
+                "hour_short",
+              ),
+            ),
+            const SizedBox(width: 6),
+            _ClockField(
+              controller:
+                  controllers.minutes,
+              label:
+                  language.translate(
+                "minute_short",
+              ),
+            ),
+            const SizedBox(width: 6),
+            _ClockField(
+              controller:
+                  controllers.seconds,
+              label:
+                  language.translate(
+                "second_short",
+              ),
+            ),
           ],
         ),
       ],
@@ -1207,20 +2144,35 @@ class _ClockEditor extends StatelessWidget {
   }
 }
 
-class _ClockField extends StatelessWidget {
-  final TextEditingController controller;
+class _ClockField
+    extends StatelessWidget {
+  final TextEditingController
+      controller;
   final String label;
 
-  const _ClockField({required this.controller, required this.label});
+  const _ClockField({
+    required this.controller,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: TextField(
         controller: controller,
-        keyboardType: TextInputType.number,
-        textAlign: TextAlign.center,
-        decoration: InputDecoration(labelText: label, isDense: true),
+        keyboardType:
+            TextInputType.number,
+        textAlign:
+            TextAlign.center,
+        decoration:
+            InputDecoration(
+          label: FittedBox(
+            fit:
+                BoxFit.scaleDown,
+            child: Text(label),
+          ),
+          isDense: true,
+        ),
       ),
     );
   }
@@ -1239,27 +2191,67 @@ class _ClockControllers {
     required this.seconds,
   });
 
-  factory _ClockControllers.fromUs(int microseconds) {
-    final total = microseconds ~/ 1000000;
+  factory _ClockControllers.fromUs(
+    int microseconds,
+  ) {
+    final total =
+        microseconds ~/ 1000000;
+
     return _ClockControllers(
-      days: TextEditingController(text: '${total ~/ 86400}'),
-      hours: TextEditingController(text: '${(total % 86400) ~/ 3600}'),
-      minutes: TextEditingController(text: '${(total % 3600) ~/ 60}'),
-      seconds: TextEditingController(text: '${total % 60}'),
+      days:
+          TextEditingController(
+        text:
+            '${total ~/ 86400}',
+      ),
+      hours:
+          TextEditingController(
+        text:
+            '${(total % 86400) ~/ 3600}',
+      ),
+      minutes:
+          TextEditingController(
+        text:
+            '${(total % 3600) ~/ 60}',
+      ),
+      seconds:
+          TextEditingController(
+        text:
+            '${total % 60}',
+      ),
     );
   }
 
   int toUs() {
-    final d = int.tryParse(days.text.trim()) ?? 0;
-    final h = int.tryParse(hours.text.trim()) ?? 0;
-    final m = int.tryParse(minutes.text.trim()) ?? 0;
-    final s = int.tryParse(seconds.text.trim()) ?? 0;
+    final d =
+        int.tryParse(
+              days.text.trim(),
+            ) ??
+            0;
+    final h =
+        int.tryParse(
+              hours.text.trim(),
+            ) ??
+            0;
+    final m =
+        int.tryParse(
+              minutes.text.trim(),
+            ) ??
+            0;
+    final s =
+        int.tryParse(
+              seconds.text.trim(),
+            ) ??
+            0;
 
-    if (d < 0 || h < 0 || m < 0 || s < 0) {
+    if (d < 0 ||
+        h < 0 ||
+        m < 0 ||
+        s < 0) {
       return -1;
     }
 
-    return (((d * 24 + h) * 60 + m) * 60 + s) * 1000000;
+    return (((d * 24 + h) * 60 + m) * 60 + s) *
+        1000000;
   }
 
   void dispose() {
@@ -1274,12 +2266,333 @@ class _SelectedInterval {
   final int startUs;
   final int endUs;
 
-  const _SelectedInterval({required this.startUs, required this.endUs});
+  const _SelectedInterval({
+    required this.startUs,
+    required this.endUs,
+  });
 }
 
-enum _ViewerAction { pdf, printPdf, apex, csv }
+enum _ViewerAction {
+  exportApex,
+  exportCsv,
+  sharePdf,
+  printPdf,
+}
 
-enum _SignalChannel { ecg, respiration }
+enum _SignalChannel {
+  ecg,
+  respiration,
+}
+
+class _RecordingSignalPainter extends CustomPainter {
+  final List<_DecodedSample> samples;
+  final List<_RecordingGap> gaps;
+  final int windowStartUs;
+  final int windowEndUs;
+  final _SignalChannel channel;
+  final Color lineColor;
+  final Color gridColor;
+  final Color baselineColor;
+  final Color gapColor;
+
+  const _RecordingSignalPainter({
+    required this.samples,
+    required this.gaps,
+    required this.windowStartUs,
+    required this.windowEndUs,
+    required this.channel,
+    required this.lineColor,
+    required this.gridColor,
+    required this.baselineColor,
+    required this.gapColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final durationUs = windowEndUs - windowStartUs;
+
+    if (durationUs <= 0 ||
+        size.width <= 0 ||
+        size.height <= 0) {
+      return;
+    }
+
+    _paintGrid(
+      canvas,
+      size,
+      durationUs,
+    );
+
+    _paintGaps(
+      canvas,
+      size,
+      durationUs,
+    );
+
+    if (samples.isEmpty) {
+      return;
+    }
+
+    final values = <double>[];
+
+    for (final sample in samples) {
+      values.add(
+        channel == _SignalChannel.ecg
+            ? sample.ecg
+            : sample.respiration,
+      );
+    }
+
+    final center = _median(values);
+    final scale = _robustScale(
+      values,
+      center,
+    );
+
+    final path = Path();
+    bool started = false;
+
+    final maxPoints =
+        math.max(400, (size.width * 3).round());
+
+    final stride = math.max(
+      1,
+      (samples.length / maxPoints).floor(),
+    );
+
+    for (int index = 0;
+        index < samples.length;
+        index += stride) {
+      final sample = samples[index];
+
+      final x = (
+        (sample.elapsedUs - windowStartUs) /
+        durationUs *
+        size.width
+      ).clamp(0.0, size.width);
+
+      final value = channel == _SignalChannel.ecg
+          ? sample.ecg
+          : sample.respiration;
+
+      final normalized = (
+        (value - center) / scale
+      ).clamp(-1.0, 1.0);
+
+      final y =
+          size.height / 2 -
+          normalized * size.height * 0.42;
+
+      if (!started) {
+        path.moveTo(x, y);
+        started = true;
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    final paint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.6
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    canvas.drawPath(path, paint);
+  }
+
+  void _paintGrid(
+    Canvas canvas,
+    Size size,
+    int durationUs,
+  ) {
+    final gridPaint = Paint()
+      ..color = gridColor.withValues(alpha: 0.45)
+      ..strokeWidth = 0.7;
+
+    final baselinePaint = Paint()
+      ..color = baselineColor
+      ..strokeWidth = 1.0;
+
+    for (int i = 1; i < 5; i++) {
+      final y = size.height * i / 5;
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        gridPaint,
+      );
+    }
+
+    final seconds =
+        durationUs / 1000000.0;
+
+    final verticalCount = seconds <= 5
+        ? 5
+        : seconds <= 20
+            ? 10
+            : 12;
+
+    for (int i = 1; i < verticalCount; i++) {
+      final x = size.width * i / verticalCount;
+
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, size.height),
+        gridPaint,
+      );
+    }
+
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width, size.height / 2),
+      baselinePaint,
+    );
+  }
+
+  void _paintGaps(
+    Canvas canvas,
+    Size size,
+    int durationUs,
+  ) {
+    if (gaps.isEmpty) {
+      return;
+    }
+
+    final paint = Paint()
+      ..color = gapColor
+      ..style = PaintingStyle.fill;
+
+    for (final gap in gaps) {
+      final gapStart = math.max(
+        gap.startElapsedUs,
+        windowStartUs,
+      );
+
+      final gapEnd = math.min(
+        gap.endElapsedUs ?? windowEndUs,
+        windowEndUs,
+      );
+
+      if (gapEnd <= gapStart) {
+        continue;
+      }
+
+      final left = (
+        (gapStart - windowStartUs) /
+        durationUs *
+        size.width
+      ).clamp(0.0, size.width);
+
+      final right = (
+        (gapEnd - windowStartUs) /
+        durationUs *
+        size.width
+      ).clamp(0.0, size.width);
+
+      canvas.drawRect(
+        Rect.fromLTRB(
+          left,
+          0,
+          right,
+          size.height,
+        ),
+        paint,
+      );
+    }
+  }
+
+  double _median(List<double> values) {
+    if (values.isEmpty) {
+      return 0;
+    }
+
+    final sorted = List<double>.from(values)
+      ..sort();
+
+    final middle = sorted.length ~/ 2;
+
+    if (sorted.length.isOdd) {
+      return sorted[middle];
+    }
+
+    return (
+      sorted[middle - 1] +
+      sorted[middle]
+    ) / 2.0;
+  }
+
+  double _robustScale(
+    List<double> values,
+    double center,
+  ) {
+    if (values.isEmpty) {
+      return 1;
+    }
+
+    final deviations = values
+        .map((value) => (value - center).abs())
+        .toList()
+      ..sort();
+
+    final index = (
+      (deviations.length - 1) * 0.97
+    ).round().clamp(
+          0,
+          deviations.length - 1,
+        );
+
+    final amplitude = deviations[index];
+
+    if (!amplitude.isFinite ||
+        amplitude < 1.0) {
+      return 1.0;
+    }
+
+    return amplitude * 1.15;
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant _RecordingSignalPainter oldDelegate,
+  ) {
+    return oldDelegate.samples != samples ||
+        oldDelegate.gaps != gaps ||
+        oldDelegate.windowStartUs != windowStartUs ||
+        oldDelegate.windowEndUs != windowEndUs ||
+        oldDelegate.channel != channel ||
+        oldDelegate.lineColor != lineColor ||
+        oldDelegate.gridColor != gridColor ||
+        oldDelegate.baselineColor != baselineColor ||
+        oldDelegate.gapColor != gapColor;
+  }
+}
+
+class _ViewerMetrics {
+  final double? estimatedHeartRateBpm;
+  final double? estimatedMeanRrMs;
+  final double? estimatedRespirationRateBpm;
+  final double? estimatedMeanBreathMs;
+  final int analyzedSamples;
+
+  const _ViewerMetrics({
+    required this.estimatedHeartRateBpm,
+    required this.estimatedMeanRrMs,
+    required this.estimatedRespirationRateBpm,
+    required this.estimatedMeanBreathMs,
+    required this.analyzedSamples,
+  });
+}
+
+class _ViewerRateEstimate {
+  final double? rateBpm;
+  final double? intervalMs;
+
+  const _ViewerRateEstimate({
+    required this.rateBpm,
+    required this.intervalMs,
+  });
+}
 
 class _DecodedSample {
   final int elapsedUs;
@@ -1293,162 +2606,860 @@ class _DecodedSample {
   });
 }
 
-class _Gap {
-  final int startUs;
-  final int? endUs;
+class _RecordingGap {
+  final int id;
+  final int startElapsedUs;
+  final int? endElapsedUs;
+  final String reason;
+  final String? details;
 
-  const _Gap({required this.startUs, required this.endUs});
+  const _RecordingGap({
+    required this.id,
+    required this.startElapsedUs,
+    required this.endElapsedUs,
+    required this.reason,
+    required this.details,
+  });
 
-  factory _Gap.fromRow(Map<String, Object?> row) {
-    return _Gap(
-      startUs: row['start_elapsed_us'] as int? ?? 0,
-      endUs: row['end_elapsed_us'] as int?,
+  factory _RecordingGap.fromRow(
+    Map<String, Object?> row,
+  ) {
+    return _RecordingGap(
+      id: row['id'] as int,
+      startElapsedUs:
+          row['start_elapsed_us'] as int? ?? 0,
+      endElapsedUs:
+          row['end_elapsed_us'] as int?,
+      reason:
+          row['reason'] as String? ?? 'unknown',
+      details:
+          row['details'] as String?,
+    );
+  }
+
+  String get label {
+    switch (reason) {
+      case 'paused':
+        return 'Paused';
+      case 'bluetooth_disconnected':
+        return 'Bluetooth disconnected';
+      default:
+        return reason;
+    }
+  }
+}
+
+class _GapTile extends StatelessWidget {
+  final _RecordingGap gap;
+  final String Function(int microseconds) formatDurationUs;
+  final String gapLabel;
+
+  const _GapTile({
+    required this.gap,
+    required this.formatDurationUs,
+    required this.gapLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+    final language =
+        context.watch<LanguageProvider>();
+    final end =
+        gap.endElapsedUs;
+
+    final label =
+        gap.reason == 'paused'
+            ? language.translate(
+                "paused",
+              )
+            : gap.reason ==
+                    'bluetooth_disconnected'
+                ? language.translate(
+                    "signal_gap",
+                  )
+                : gapLabel;
+
+    return Container(
+      padding:
+          const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainer,
+        borderRadius:
+            BorderRadius.circular(12),
+        border: Border.all(
+          color:
+              scheme.outlineVariant,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 34,
+            decoration:
+                BoxDecoration(
+              borderRadius:
+                  BorderRadius.circular(
+                4,
+              ),
+              color:
+                  gap.reason ==
+                          'paused'
+                      ? scheme.tertiary
+                      : scheme.error,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
+              children: [
+                Text(
+                  label,
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .labelLarge,
+                ),
+                const SizedBox(
+                  height: 3,
+                ),
+                Text(
+                  end == null
+                      ? '${formatDurationUs(gap.startElapsedUs)} → ${language.translate("open")}'
+                      : '${formatDurationUs(gap.startElapsedUs)} → ${formatDurationUs(end)}',
+                  style:
+                      Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: scheme
+                                .onSurfaceVariant,
+                            fontFeatures:
+                                const [
+                              FontFeature
+                                  .tabularFigures(),
+                            ],
+                          ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _SignalPainter extends CustomPainter {
-  final List<_DecodedSample> samples;
-  final List<_Gap> gaps;
-  final int startUs;
-  final int endUs;
-  final _SignalChannel channel;
-  final Color lineColor;
-  final Color gridColor;
-  final Color gapColor;
+class _VitalsCard extends StatelessWidget {
+  final _ViewerMetrics? metrics;
+  final bool loading;
+  final String averageLabel;
 
-  const _SignalPainter({
-    required this.samples,
-    required this.gaps,
-    required this.startUs,
-    required this.endUs,
-    required this.channel,
-    required this.lineColor,
-    required this.gridColor,
-    required this.gapColor,
+  const _VitalsCard({
+    required this.metrics,
+    required this.loading,
+    required this.averageLabel,
   });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final durationUs = endUs - startUs;
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
 
-    if (durationUs <= 0 || size.width <= 0 || size.height <= 0) {
-      return;
-    }
+    final heart =
+        metrics?.estimatedHeartRateBpm;
+    final respiration =
+        metrics?.estimatedRespirationRateBpm;
 
-    final grid = Paint()
-      ..color = gridColor.withValues(alpha: 0.42)
-      ..strokeWidth = 0.7;
-
-    for (int i = 1; i < 5; i++) {
-      final y = size.height * i / 5;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
-
-    for (int i = 1; i < 10; i++) {
-      final x = size.width * i / 10;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
-    }
-
-    final gapPaint = Paint()
-      ..color = gapColor
-      ..style = PaintingStyle.fill;
-
-    for (final gap in gaps) {
-      final gapStart = math.max(startUs, gap.startUs);
-      final gapEnd = math.min(endUs, gap.endUs ?? endUs);
-
-      if (gapEnd <= gapStart) {
-        continue;
-      }
-
-      final left = (gapStart - startUs) / durationUs * size.width;
-      final right = (gapEnd - startUs) / durationUs * size.width;
-      canvas.drawRect(Rect.fromLTRB(left, 0, right, size.height), gapPaint);
-    }
-
-    if (samples.length < 2) {
-      return;
-    }
-
-    final values = samples
-        .map(
-          (sample) =>
-              channel == _SignalChannel.ecg ? sample.ecg : sample.respiration,
-        )
-        .toList(growable: false);
-    final center = _median(values);
-    final scale = _robustScale(values, center);
-    final path = Path();
-    var started = false;
-
-    for (final sample in samples) {
-      final x = ((sample.elapsedUs - startUs) / durationUs * size.width).clamp(
-        0.0,
-        size.width,
-      );
-      final value = channel == _SignalChannel.ecg
-          ? sample.ecg
-          : sample.respiration;
-      final normalized = ((value - center) / scale).clamp(-1.0, 1.0);
-      final y = size.height / 2 - normalized * size.height * 0.42;
-
-      if (!started) {
-        path.moveTo(x, y);
-        started = true;
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = lineColor
-        ..strokeWidth = 1.55
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..isAntiAlias = true,
+    return Container(
+      width: double.infinity,
+      padding:
+          const EdgeInsets.symmetric(
+        vertical: 13,
+        horizontal: 8,
+      ),
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainer,
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              scheme.outlineVariant,
+        ),
+      ),
+      child: SizedBox(
+        height: 76,
+        child: Row(
+          children: [
+            Expanded(
+              child: _VitalValue(
+                value: loading
+                    ? '...'
+                    : heart == null
+                        ? '--'
+                        : heart
+                            .round()
+                            .toString(),
+                unit: 'BPM',
+                label:
+                    averageLabel,
+                accent:
+                    const Color(
+                  0xFFE74C4C,
+                ),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 48,
+              color:
+                  scheme.outlineVariant,
+            ),
+            Expanded(
+              child: _VitalValue(
+                value: loading
+                    ? '...'
+                    : respiration == null
+                        ? '--'
+                        : respiration
+                            .round()
+                            .toString(),
+                unit: 'BRPM',
+                label:
+                    averageLabel,
+                accent:
+                    scheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+}
 
-  double _median(List<double> values) {
-    final sorted = List<double>.from(values)..sort();
-    final middle = sorted.length ~/ 2;
+class _VitalValue extends StatelessWidget {
+  final String value;
+  final String unit;
+  final String label;
+  final Color accent;
 
-    if (sorted.length.isOdd) {
-      return sorted[middle];
-    }
-
-    return (sorted[middle - 1] + sorted[middle]) / 2;
-  }
-
-  double _robustScale(List<double> values, double center) {
-    final deviations = values.map((value) => (value - center).abs()).toList()
-      ..sort();
-    final index = ((deviations.length - 1) * 0.97).round().clamp(
-      0,
-      deviations.length - 1,
-    );
-    final scale = deviations[index];
-
-    if (!scale.isFinite || scale < 1) {
-      return 1;
-    }
-
-    return scale * 1.15;
-  }
+  const _VitalValue({
+    required this.value,
+    required this.unit,
+    required this.label,
+    required this.accent,
+  });
 
   @override
-  bool shouldRepaint(covariant _SignalPainter oldDelegate) {
-    return oldDelegate.samples != samples ||
-        oldDelegate.gaps != gaps ||
-        oldDelegate.startUs != startUs ||
-        oldDelegate.endUs != endUs ||
-        oldDelegate.channel != channel ||
-        oldDelegate.lineColor != lineColor ||
-        oldDelegate.gridColor != gridColor ||
-        oldDelegate.gapColor != gapColor;
+  Widget build(BuildContext context) {
+    final muted =
+        Theme.of(context)
+            .colorScheme
+            .onSurfaceVariant;
+
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal: 10,
+      ),
+      child: Column(
+        mainAxisAlignment:
+            MainAxisAlignment.center,
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment:
+                CrossAxisAlignment.end,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                margin:
+                    const EdgeInsets.only(
+                  right: 7,
+                  bottom: 5,
+                ),
+                decoration:
+                    BoxDecoration(
+                  shape:
+                      BoxShape.circle,
+                  color: accent,
+                ),
+              ),
+              Flexible(
+                child: FittedBox(
+                  fit:
+                      BoxFit.scaleDown,
+                  alignment:
+                      Alignment
+                          .centerLeft,
+                  child: Row(
+                    crossAxisAlignment:
+                        CrossAxisAlignment
+                            .end,
+                    children: [
+                      Text(
+                        value,
+                        style:
+                            Theme.of(
+                          context,
+                        )
+                                .textTheme
+                                .headlineMedium
+                                ?.copyWith(
+                                  fontWeight:
+                                      FontWeight
+                                          .w600,
+                                  height:
+                                      1,
+                                ),
+                      ),
+                      const SizedBox(
+                        width: 4,
+                      ),
+                      Padding(
+                        padding:
+                            const EdgeInsets
+                                .only(
+                          bottom: 3,
+                        ),
+                        child: Text(
+                          unit,
+                          style:
+                              Theme.of(
+                            context,
+                          )
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color:
+                                        muted,
+                                  ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            label,
+            maxLines: 1,
+            overflow:
+                TextOverflow.ellipsis,
+            style:
+                Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(
+                      color: muted,
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IntervalSelector
+    extends StatelessWidget {
+  final String title;
+  final String start;
+  final String end;
+  final String changeLabel;
+  final VoidCallback onChange;
+
+  const _IntervalSelector({
+    required this.title,
+    required this.start,
+    required this.end,
+    required this.changeLabel,
+    required this.onChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding:
+          const EdgeInsets.fromLTRB(
+        14,
+        11,
+        10,
+        11,
+      ),
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainer,
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              scheme.outlineVariant,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
+              children: [
+                Text(
+                  title,
+                  style:
+                      Theme.of(
+                    context,
+                  )
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(
+                            color: scheme
+                                .onSurfaceVariant,
+                          ),
+                ),
+                const SizedBox(
+                  height: 3,
+                ),
+                Text(
+                  '$start  →  $end',
+                  maxLines: 1,
+                  overflow:
+                      TextOverflow
+                          .ellipsis,
+                  style:
+                      Theme.of(
+                    context,
+                  )
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                            fontFeatures:
+                                const [
+                              FontFeature
+                                  .tabularFigures(),
+                            ],
+                          ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onChange,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child:
+                  Text(changeLabel),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TechnicalDetailsCard
+    extends StatelessWidget {
+  final String title;
+  final String rrLabel;
+  final String breathLabel;
+  final String sampleRateLabel;
+  final String samplesLabel;
+  final String coverageLabel;
+  final String measuredLabel;
+  final String timelineLabel;
+  final String startedLabel;
+  final String statusLabel;
+  final String deviceLabel;
+  final String notesLabel;
+  final String disclaimer;
+  final double? rrMs;
+  final double? breathMs;
+  final double sampleRate;
+  final int sampleCount;
+  final int timelineDurationUs;
+  final String measuredDuration;
+  final String timelineDuration;
+  final String started;
+  final String status;
+  final String? device;
+  final String? notes;
+
+  const _TechnicalDetailsCard({
+    required this.title,
+    required this.rrLabel,
+    required this.breathLabel,
+    required this.sampleRateLabel,
+    required this.samplesLabel,
+    required this.coverageLabel,
+    required this.measuredLabel,
+    required this.timelineLabel,
+    required this.startedLabel,
+    required this.statusLabel,
+    required this.deviceLabel,
+    required this.notesLabel,
+    required this.disclaimer,
+    required this.rrMs,
+    required this.breathMs,
+    required this.sampleRate,
+    required this.sampleCount,
+    required this.timelineDurationUs,
+    required this.measuredDuration,
+    required this.timelineDuration,
+    required this.started,
+    required this.status,
+    required this.device,
+    required this.notes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    final timelineSeconds =
+        timelineDurationUs /
+        Duration
+            .microsecondsPerSecond;
+    final measuredSeconds =
+        sampleRate <= 0
+            ? 0.0
+            : sampleCount /
+                sampleRate;
+    final coverage =
+        timelineSeconds <= 0
+            ? 0.0
+            : (measuredSeconds /
+                    timelineSeconds *
+                    100)
+                .clamp(
+                  0.0,
+                  100.0,
+                );
+
+    final rows =
+        <MapEntry<String, String>>[
+      MapEntry(
+        rrLabel,
+        rrMs == null
+            ? '--'
+            : '${rrMs!.toStringAsFixed(0)} ms',
+      ),
+      MapEntry(
+        breathLabel,
+        breathMs == null
+            ? '--'
+            : '${breathMs!.toStringAsFixed(0)} ms',
+      ),
+      MapEntry(
+        sampleRateLabel,
+        '${sampleRate.toStringAsFixed(0)} Hz',
+      ),
+      MapEntry(
+        samplesLabel,
+        _formatCount(
+          sampleCount,
+        ),
+      ),
+      MapEntry(
+        coverageLabel,
+        '${coverage.toStringAsFixed(1)}%',
+      ),
+      MapEntry(
+        measuredLabel,
+        measuredDuration,
+      ),
+      MapEntry(
+        timelineLabel,
+        timelineDuration,
+      ),
+      MapEntry(
+        startedLabel,
+        started,
+      ),
+      MapEntry(
+        statusLabel,
+        status,
+      ),
+      MapEntry(
+        deviceLabel,
+        device == null ||
+                device!.trim().isEmpty
+            ? '--'
+            : device!,
+      ),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding:
+          const EdgeInsets.fromLTRB(
+        16,
+        15,
+        16,
+        14,
+      ),
+      decoration: BoxDecoration(
+        color:
+            scheme.surfaceContainer,
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              scheme.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style:
+                Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(
+                      fontWeight:
+                          FontWeight.w600,
+                    ),
+          ),
+          const SizedBox(height: 8),
+          ...rows.map(
+            (entry) =>
+                _TechnicalRow(
+              label: entry.key,
+              value: entry.value,
+            ),
+          ),
+          if (notes != null &&
+              notes!.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              notesLabel,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .labelMedium
+                      ?.copyWith(
+                        color: scheme
+                            .onSurfaceVariant,
+                      ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              notes!,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .bodySmall,
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            disclaimer,
+            style:
+                Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(
+                      color: scheme
+                          .onSurfaceVariant,
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatCount(
+    int count,
+  ) {
+    if (count >= 1000000) {
+      return '${(count / 1000000).toStringAsFixed(2)}M';
+    }
+
+    if (count >= 1000) {
+      return '${(count / 1000).toStringAsFixed(1)}K';
+    }
+
+    return '$count';
+  }
+}
+
+class _TechnicalRow
+    extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _TechnicalRow({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        vertical: 6,
+      ),
+      child: Row(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(
+                        color: scheme
+                            .onSurfaceVariant,
+                      ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Flexible(
+            child: Text(
+              value,
+              textAlign:
+                  TextAlign.right,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                      ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ViewerActionRow
+    extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _ViewerActionRow({
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(
+          vertical: 14,
+        ),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color:
+                  scheme.outlineVariant,
+            ),
+          ),
+        ),
+        child: Text(
+          label,
+          maxLines: 2,
+          overflow:
+              TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorBody extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _ErrorBody({
+    required this.message,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme =
+        Theme.of(context).colorScheme;
+    final language =
+        context.watch<LanguageProvider>();
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 3,
+              decoration: BoxDecoration(
+                borderRadius:
+                    BorderRadius.circular(
+                  4,
+                ),
+                color: scheme.error,
+              ),
+            ),
+            const SizedBox(
+              height: 14,
+            ),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: onRetry,
+              child: Text(
+                language.translate(
+                  "retry",
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

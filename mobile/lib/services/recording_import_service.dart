@@ -29,18 +29,30 @@ class RecordingImportService {
       typeGroup = const XTypeGroup(
         label: 'ApexCardio recordings',
         uniformTypeIdentifiers: <String>[
-          'public.data',
+          'com.apexcardio.recording',
           'public.comma-separated-values-text',
+          'public.database',
+          'public.data',
         ],
       );
     } else {
       typeGroup = const XTypeGroup(
         label: 'ApexCardio recordings',
-        extensions: <String>['apex', 'csv', 'db', 'sqlite', 'sqlite3'],
+        extensions: <String>[
+          'apex',
+          'csv',
+          'db',
+          'sqlite',
+          'sqlite3',
+        ],
       );
     }
 
-    final file = await openFile(acceptedTypeGroups: <XTypeGroup>[typeGroup]);
+    final file = await openFile(
+      acceptedTypeGroups: <XTypeGroup>[
+        typeGroup,
+      ],
+    );
 
     if (file == null) {
       return null;
@@ -106,40 +118,60 @@ class RecordingImportService {
       }
 
       final sourceRecording = sourceRecordings.first;
-      final sourceRecordingId = _readRequiredInt(sourceRecording, 'id');
+      final sourceRecordingId = _readRequiredInt(
+        sourceRecording,
+        'id',
+      );
 
-      final sourceName =
-          _readString(sourceRecording['name']) ??
+      final sourceName = _readString(
+            sourceRecording['name'],
+          ) ??
           _baseNameWithoutExtension(file.name);
 
-      final sourceNotes = _readString(sourceRecording['notes']);
+      final sourceNotes = _readString(
+        sourceRecording['notes'],
+      );
 
-      final sourceMetadata = _readString(sourceRecording['metadata_json']);
+      final sourceMetadata = _readString(
+        sourceRecording['metadata_json'],
+      );
 
-      final sourceStartedAtMs =
-          _readInt(sourceRecording['started_at_ms']) ??
+      final sourceStartedAtMs = _readInt(
+            sourceRecording['started_at_ms'],
+          ) ??
           DateTime.now().millisecondsSinceEpoch;
 
-      final sourceEndedAtMs = _readInt(sourceRecording['ended_at_ms']);
+      final sourceEndedAtMs = _readInt(
+        sourceRecording['ended_at_ms'],
+      );
 
-      final sourceSampleRate =
-          _readDouble(sourceRecording['sample_rate']) ??
+      final sourceSampleRate = _readDouble(
+            sourceRecording['sample_rate'],
+          ) ??
           _defaultSampleRate.toDouble();
 
       if (!sourceSampleRate.isFinite ||
           sourceSampleRate <= 0 ||
           sourceSampleRate > 10000) {
-        throw const FormatException('Invalid sample rate in ApexCardio file.');
+        throw const FormatException(
+          'Invalid sample rate in ApexCardio file.',
+        );
       }
 
-      final sourceDeviceName = _readString(sourceRecording['device_name']);
+      final sourceDeviceName = _readString(
+        sourceRecording['device_name'],
+      );
 
-      final sourceUid = _readString(sourceRecording['recording_uid']);
+      final sourceUid = _readString(
+        sourceRecording['recording_uid'],
+      );
 
       String? importUid = sourceUid;
 
       if (importUid != null) {
-        final duplicate = await _database.getRecordingByUid(importUid);
+        final duplicate = await _database.getRecordingByUid(
+          importUid,
+        );
 
         if (duplicate != null) {
           importUid = null;
@@ -167,7 +199,9 @@ class RecordingImportService {
         final rows = await sourceDatabase.query(
           'signal_chunks',
           where: 'recording_id = ?',
-          whereArgs: <Object?>[sourceRecordingId],
+          whereArgs: <Object?>[
+            sourceRecordingId,
+          ],
           orderBy: 'chunk_index ASC',
           limit: _batchChunkCount,
           offset: offset,
@@ -180,13 +214,25 @@ class RecordingImportService {
         final batch = destinationDb.batch();
 
         for (final row in rows) {
-          final chunkIndex = _readRequiredInt(row, 'chunk_index');
+          final chunkIndex = _readRequiredInt(
+            row,
+            'chunk_index',
+          );
 
-          final startUs = _readRequiredInt(row, 'start_elapsed_us');
+          final startUs = _readRequiredInt(
+            row,
+            'start_elapsed_us',
+          );
 
-          final sampleCount = _readRequiredInt(row, 'sample_count');
+          final sampleCount = _readRequiredInt(
+            row,
+            'sample_count',
+          );
 
-          final encodingVersion = _readInt(row['encoding_version']) ?? 1;
+          final encodingVersion = _readInt(
+                row['encoding_version'],
+              ) ??
+              1;
 
           final rawSignal = row['signal_data'];
 
@@ -196,44 +242,67 @@ class RecordingImportService {
             );
           }
 
-          if (startUs < 0 || sampleCount <= 0 || encodingVersion != 1) {
-            throw const FormatException('Unsupported ApexCardio signal chunk.');
+          if (startUs < 0 ||
+              sampleCount <= 0 ||
+              encodingVersion != 1) {
+            throw const FormatException(
+              'Unsupported ApexCardio signal chunk.',
+            );
           }
 
           final signalData = _asUint8List(rawSignal);
 
-          if (signalData == null || signalData.length != sampleCount * 8) {
-            throw const FormatException('Corrupted ApexCardio signal data.');
+          if (signalData == null ||
+              signalData.length != sampleCount * 8) {
+            throw const FormatException(
+              'Corrupted ApexCardio signal data.',
+            );
           }
 
-          final calculatedEndUs =
-              startUs +
-              (sampleCount * Duration.microsecondsPerSecond / sourceSampleRate)
+          final calculatedEndUs = startUs +
+              (sampleCount *
+                      Duration.microsecondsPerSecond /
+                      sourceSampleRate)
                   .round();
 
-          final storedEndUs = _readInt(row['end_elapsed_us']);
+          final storedEndUs = _readInt(
+            row['end_elapsed_us'],
+          );
 
           final endUs = storedEndUs == null
               ? calculatedEndUs
-              : math.max(calculatedEndUs, storedEndUs);
+              : math.max(
+                  calculatedEndUs,
+                  storedEndUs,
+                );
 
-          batch.insert('signal_chunks', <String, Object?>{
-            'recording_id': destinationRecordingId,
-            'chunk_index': chunkIndex,
-            'start_elapsed_us': startUs,
-            'end_elapsed_us': endUs,
-            'sample_count': sampleCount,
-            'encoding_version': 1,
-            'signal_data': signalData,
-          }, conflictAlgorithm: ConflictAlgorithm.abort);
+          batch.insert(
+            'signal_chunks',
+            <String, Object?>{
+              'recording_id': destinationRecordingId,
+              'chunk_index': chunkIndex,
+              'start_elapsed_us': startUs,
+              'end_elapsed_us': endUs,
+              'sample_count': sampleCount,
+              'encoding_version': 1,
+              'signal_data': signalData,
+            },
+            conflictAlgorithm: ConflictAlgorithm.abort,
+          );
 
           copiedSamples += sampleCount;
-          maximumElapsedUs = math.max(maximumElapsedUs, endUs);
+          maximumElapsedUs = math.max(
+            maximumElapsedUs,
+            endUs,
+          );
 
           expectedChunkIndex++;
         }
 
-        await batch.commit(noResult: true, continueOnError: false);
+        await batch.commit(
+          noResult: true,
+          continueOnError: false,
+        );
 
         offset += rows.length;
       }
@@ -241,7 +310,9 @@ class RecordingImportService {
       final gapRows = await sourceDatabase.query(
         'recording_gaps',
         where: 'recording_id = ?',
-        whereArgs: <Object?>[sourceRecordingId],
+        whereArgs: <Object?>[
+          sourceRecordingId,
+        ],
         orderBy: 'start_elapsed_us ASC',
       );
 
@@ -249,48 +320,78 @@ class RecordingImportService {
         final gapBatch = destinationDb.batch();
 
         for (final row in gapRows) {
-          final startUs = _readRequiredInt(row, 'start_elapsed_us');
+          final startUs = _readRequiredInt(
+            row,
+            'start_elapsed_us',
+          );
 
-          final endUs = _readInt(row['end_elapsed_us']);
+          final endUs = _readInt(
+            row['end_elapsed_us'],
+          );
 
-          final reason = _readString(row['reason']) ?? 'unknown';
+          final reason = _readString(
+                row['reason'],
+              ) ??
+              'unknown';
 
-          final details = _readString(row['details']);
+          final details = _readString(
+            row['details'],
+          );
 
-          if (startUs < 0 || (endUs != null && endUs < startUs)) {
-            throw const FormatException('Corrupted ApexCardio gap data.');
+          if (startUs < 0 ||
+              (endUs != null && endUs < startUs)) {
+            throw const FormatException(
+              'Corrupted ApexCardio gap data.',
+            );
           }
 
-          gapBatch.insert('recording_gaps', <String, Object?>{
-            'recording_id': destinationRecordingId,
-            'start_elapsed_us': startUs,
-            'end_elapsed_us': endUs,
-            'reason': reason,
-            'details': details,
-          });
+          gapBatch.insert(
+            'recording_gaps',
+            <String, Object?>{
+              'recording_id': destinationRecordingId,
+              'start_elapsed_us': startUs,
+              'end_elapsed_us': endUs,
+              'reason': reason,
+              'details': details,
+            },
+          );
 
-          maximumElapsedUs = math.max(maximumElapsedUs, endUs ?? startUs);
+          maximumElapsedUs = math.max(
+            maximumElapsedUs,
+            endUs ?? startUs,
+          );
         }
 
-        await gapBatch.commit(noResult: true, continueOnError: false);
+        await gapBatch.commit(
+          noResult: true,
+          continueOnError: false,
+        );
       }
 
-      final sourceTimelineUs =
-          _readInt(sourceRecording['timeline_duration_us']) ?? 0;
+      final sourceTimelineUs = _readInt(
+            sourceRecording['timeline_duration_us'],
+          ) ??
+          0;
 
-      final finalTimelineUs = math.max(sourceTimelineUs, maximumElapsedUs);
+      final finalTimelineUs = math.max(
+        sourceTimelineUs,
+        maximumElapsedUs,
+      );
 
-      final sourceStatus =
-          _readString(sourceRecording['status']) ?? 'completed';
+      final sourceStatus = _readString(
+            sourceRecording['status'],
+          ) ??
+          'completed';
 
       final finalStatus = sourceStatus == 'completed'
           ? 'completed'
           : 'interrupted';
 
       final now = DateTime.now().millisecondsSinceEpoch;
-      final finalEndedAtMs =
-          sourceEndedAtMs ??
-          _readInt(sourceRecording['last_heartbeat_at_ms']) ??
+      final finalEndedAtMs = sourceEndedAtMs ??
+          _readInt(
+            sourceRecording['last_heartbeat_at_ms'],
+          ) ??
           now;
 
       await destinationDb.update(
@@ -305,7 +406,9 @@ class RecordingImportService {
           'updated_at_ms': now,
         },
         where: 'id = ?',
-        whereArgs: <Object?>[destinationRecordingId],
+        whereArgs: <Object?>[
+          destinationRecordingId,
+        ],
       );
 
       await _database.checkpoint();
@@ -314,7 +417,9 @@ class RecordingImportService {
     } catch (_) {
       if (destinationRecordingId != null) {
         try {
-          await _database.deleteRecording(destinationRecordingId);
+          await _database.deleteRecording(
+            destinationRecordingId,
+          );
         } catch (_) {}
       }
 
@@ -337,43 +442,68 @@ class RecordingImportService {
 
     try {
       final iterator = StreamIterator<String>(
-        utf8.decoder.bind(file.openRead()).transform(const LineSplitter()),
+        utf8.decoder
+            .bind(file.openRead())
+            .transform(const LineSplitter()),
       );
 
       if (!await iterator.moveNext()) {
-        throw const FormatException('CSV file is empty.');
+        throw const FormatException(
+          'CSV file is empty.',
+        );
       }
 
-      final firstLine = _stripBom(iterator.current);
+      final firstLine = _stripBom(
+        iterator.current,
+      );
 
-      final delimiter = _detectDelimiter(firstLine);
+      final delimiter = _detectDelimiter(
+        firstLine,
+      );
 
-      final firstRow = _parseCsvLine(firstLine, delimiter);
+      final firstRow = _parseCsvLine(
+        firstLine,
+        delimiter,
+      );
 
       if (firstRow.isEmpty) {
-        throw const FormatException('CSV file has no columns.');
+        throw const FormatException(
+          'CSV file has no columns.',
+        );
       }
 
-      final columnMap = _detectColumns(firstRow);
+      final columnMap = _detectColumns(
+        firstRow,
+      );
 
       final prefetched = <_CsvInputRow>[];
 
       if (!columnMap.hasHeader) {
-        final parsed = _parseCsvDataRow(firstRow, columnMap);
+        final parsed = _parseCsvDataRow(
+          firstRow,
+          columnMap,
+        );
 
         if (parsed != null) {
           prefetched.add(parsed);
         }
       }
 
-      while (prefetched.length < 80 && await iterator.moveNext()) {
-        final row = _parseCsvLine(iterator.current, delimiter);
+      while (prefetched.length < 80 &&
+          await iterator.moveNext()) {
+        final row = _parseCsvLine(
+          iterator.current,
+          delimiter,
+        );
 
         if (_isEmptyRow(row)) {
           continue;
         }
 
-        final parsed = _parseCsvDataRow(row, columnMap);
+        final parsed = _parseCsvDataRow(
+          row,
+          columnMap,
+        );
 
         if (parsed != null) {
           prefetched.add(parsed);
@@ -386,11 +516,14 @@ class RecordingImportService {
         );
       }
 
-      final timing = _inferCsvTiming(prefetched, columnMap.timeHeader);
+      final timing = _inferCsvTiming(
+        prefetched,
+        columnMap.timeHeader,
+      );
 
       final now = DateTime.now();
-      final importStartMs =
-          timing.absoluteStartMs ?? now.millisecondsSinceEpoch;
+      final importStartMs = timing.absoluteStartMs ??
+          now.millisecondsSinceEpoch;
 
       final metadata = <String, Object?>{
         'imported_from': file.name,
@@ -402,7 +535,9 @@ class RecordingImportService {
       }
 
       final newRecordingId = await _database.createRecording(
-        name: _baseNameWithoutExtension(file.name),
+        name: _baseNameWithoutExtension(
+          file.name,
+        ),
         metadataJson: jsonEncode(metadata),
         startedAtMs: importStartMs,
         sampleRate: timing.sampleRate,
@@ -420,23 +555,35 @@ class RecordingImportService {
       );
 
       for (final row in prefetched) {
-        await writer.add(row, timing);
+        await writer.add(
+          row,
+          timing,
+        );
       }
 
       while (await iterator.moveNext()) {
-        final row = _parseCsvLine(iterator.current, delimiter);
+        final row = _parseCsvLine(
+          iterator.current,
+          delimiter,
+        );
 
         if (_isEmptyRow(row)) {
           continue;
         }
 
-        final parsed = _parseCsvDataRow(row, columnMap);
+        final parsed = _parseCsvDataRow(
+          row,
+          columnMap,
+        );
 
         if (parsed == null) {
           continue;
         }
 
-        await writer.add(parsed, timing);
+        await writer.add(
+          parsed,
+          timing,
+        );
       }
 
       await iterator.cancel();
@@ -452,9 +599,12 @@ class RecordingImportService {
       final endedAtMs = timing.absoluteStartMs == null
           ? now.millisecondsSinceEpoch
           : importStartMs +
-                (finalTimelineUs / Duration.microsecondsPerMillisecond).round();
+              (finalTimelineUs /
+                      Duration.microsecondsPerMillisecond)
+                  .round();
 
-      final updateTime = DateTime.now().millisecondsSinceEpoch;
+      final updateTime =
+          DateTime.now().millisecondsSinceEpoch;
 
       await destinationDb.update(
         'recordings',
@@ -463,12 +613,15 @@ class RecordingImportService {
           'status': 'completed',
           'timeline_duration_us': finalTimelineUs,
           'recorded_sample_count': writer.sampleCount,
-          'last_committed_elapsed_us': writer.lastCommittedElapsedUs,
+          'last_committed_elapsed_us':
+              writer.lastCommittedElapsedUs,
           'last_heartbeat_at_ms': endedAtMs,
           'updated_at_ms': updateTime,
         },
         where: 'id = ?',
-        whereArgs: <Object?>[newRecordingId],
+        whereArgs: <Object?>[
+          newRecordingId,
+        ],
       );
 
       await _database.checkpoint();
@@ -477,7 +630,9 @@ class RecordingImportService {
     } catch (_) {
       if (recordingId != null) {
         try {
-          await _database.deleteRecording(recordingId);
+          await _database.deleteRecording(
+            recordingId,
+          );
         } catch (_) {}
       }
 
@@ -485,8 +640,11 @@ class RecordingImportService {
     }
   }
 
-  Future<void> _validateApexDatabase(Database database) async {
-    final tableRows = await database.rawQuery('''
+  Future<void> _validateApexDatabase(
+    Database database,
+  ) async {
+    final tableRows = await database.rawQuery(
+      '''
       SELECT name
       FROM sqlite_master
       WHERE type = 'table'
@@ -495,10 +653,13 @@ class RecordingImportService {
           'signal_chunks',
           'recording_gaps'
         )
-      ''');
+      ''',
+    );
 
     final tables = tableRows
-        .map((row) => row['name'] as String?)
+        .map(
+          (row) => row['name'] as String?,
+        )
         .whereType<String>()
         .toSet();
 
@@ -523,17 +684,23 @@ class RecordingImportService {
     );
 
     final recordingColumnNames = recordingColumns
-        .map((row) => row['name'] as String?)
+        .map(
+          (row) => row['name'] as String?,
+        )
         .whereType<String>()
         .toSet();
 
     final chunkColumnNames = chunkColumns
-        .map((row) => row['name'] as String?)
+        .map(
+          (row) => row['name'] as String?,
+        )
         .whereType<String>()
         .toSet();
 
     final gapColumnNames = gapColumns
-        .map((row) => row['name'] as String?)
+        .map(
+          (row) => row['name'] as String?,
+        )
         .whereType<String>()
         .toSet();
 
@@ -561,21 +728,38 @@ class RecordingImportService {
       'reason',
     };
 
-    if (!recordingColumnNames.containsAll(requiredRecordingColumns) ||
-        !chunkColumnNames.containsAll(requiredChunkColumns) ||
-        !gapColumnNames.containsAll(requiredGapColumns)) {
-      throw const FormatException('Unsupported ApexCardio database schema.');
+    if (!recordingColumnNames.containsAll(
+          requiredRecordingColumns,
+        ) ||
+        !chunkColumnNames.containsAll(
+          requiredChunkColumns,
+        ) ||
+        !gapColumnNames.containsAll(
+          requiredGapColumns,
+        )) {
+      throw const FormatException(
+        'Unsupported ApexCardio database schema.',
+      );
     }
 
-    final quickCheck = await database.rawQuery('PRAGMA quick_check(1)');
+    final quickCheck = await database.rawQuery(
+      'PRAGMA quick_check(1)',
+    );
 
     if (quickCheck.isEmpty ||
-        quickCheck.first.values.first?.toString().toLowerCase() != 'ok') {
-      throw const FormatException('The ApexCardio file is corrupted.');
+        quickCheck.first.values.first
+                ?.toString()
+                .toLowerCase() !=
+            'ok') {
+      throw const FormatException(
+        'The ApexCardio file is corrupted.',
+      );
     }
   }
 
-  Future<String> _resolveReadableDatabasePath(XFile file) async {
+  Future<String> _resolveReadableDatabasePath(
+    XFile file,
+  ) async {
     final sourcePath = file.path;
 
     if (sourcePath.isNotEmpty) {
@@ -586,23 +770,32 @@ class RecordingImportService {
       }
     }
 
-    final databaseDirectory = await getDatabasesPath();
+    final databaseDirectory =
+        await getDatabasesPath();
 
     final temporaryPath = p.join(
       databaseDirectory,
       'apex_import_${DateTime.now().microsecondsSinceEpoch}.db',
     );
 
-    await file.saveTo(temporaryPath);
+    await file.saveTo(
+      temporaryPath,
+    );
 
     return temporaryPath;
   }
 
-  Future<Uint8List> _readPrefix(XFile file, int byteCount) async {
-    final builder = BytesBuilder(copy: false);
+  Future<Uint8List> _readPrefix(
+    XFile file,
+    int byteCount,
+  ) async {
+    final builder = BytesBuilder(
+      copy: false,
+    );
 
     await for (final chunk in file.openRead()) {
-      final remaining = byteCount - builder.length;
+      final remaining =
+          byteCount - builder.length;
 
       if (remaining <= 0) {
         break;
@@ -611,7 +804,12 @@ class RecordingImportService {
       if (chunk.length <= remaining) {
         builder.add(chunk);
       } else {
-        builder.add(chunk.sublist(0, remaining));
+        builder.add(
+          chunk.sublist(
+            0,
+            remaining,
+          ),
+        );
       }
 
       if (builder.length >= byteCount) {
@@ -622,7 +820,9 @@ class RecordingImportService {
     return builder.takeBytes();
   }
 
-  bool _isSqliteHeader(Uint8List bytes) {
+  bool _isSqliteHeader(
+    Uint8List bytes,
+  ) {
     const header = <int>[
       0x53,
       0x51,
@@ -656,21 +856,31 @@ class RecordingImportService {
   }
 
   String _stripBom(String value) {
-    if (value.isNotEmpty && value.codeUnitAt(0) == 0xFEFF) {
+    if (value.isNotEmpty &&
+        value.codeUnitAt(0) == 0xFEFF) {
       return value.substring(1);
     }
 
     return value;
   }
 
-  String _detectDelimiter(String line) {
-    const candidates = <String>[',', ';', '\t'];
+  String _detectDelimiter(
+    String line,
+  ) {
+    const candidates = <String>[
+      ',',
+      ';',
+      '\t',
+    ];
 
     var best = ',';
     var bestCount = -1;
 
     for (final candidate in candidates) {
-      final count = _countDelimiterOutsideQuotes(line, candidate);
+      final count = _countDelimiterOutsideQuotes(
+        line,
+        candidate,
+      );
 
       if (count > bestCount) {
         best = candidate;
@@ -681,7 +891,10 @@ class RecordingImportService {
     return best;
   }
 
-  int _countDelimiterOutsideQuotes(String line, String delimiter) {
+  int _countDelimiterOutsideQuotes(
+    String line,
+    String delimiter,
+  ) {
     var count = 0;
     var inQuotes = false;
 
@@ -689,7 +902,9 @@ class RecordingImportService {
       final character = line[i];
 
       if (character == '"') {
-        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+        if (inQuotes &&
+            i + 1 < line.length &&
+            line[i + 1] == '"') {
           i++;
           continue;
         }
@@ -698,7 +913,8 @@ class RecordingImportService {
         continue;
       }
 
-      if (!inQuotes && character == delimiter) {
+      if (!inQuotes &&
+          character == delimiter) {
         count++;
       }
     }
@@ -706,7 +922,10 @@ class RecordingImportService {
     return count;
   }
 
-  List<String> _parseCsvLine(String line, String delimiter) {
+  List<String> _parseCsvLine(
+    String line,
+    String delimiter,
+  ) {
     final fields = <String>[];
     final field = StringBuffer();
     var inQuotes = false;
@@ -715,7 +934,9 @@ class RecordingImportService {
       final character = line[i];
 
       if (character == '"') {
-        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+        if (inQuotes &&
+            i + 1 < line.length &&
+            line[i + 1] == '"') {
           field.write('"');
           i++;
           continue;
@@ -725,8 +946,11 @@ class RecordingImportService {
         continue;
       }
 
-      if (!inQuotes && character == delimiter) {
-        fields.add(field.toString().trim());
+      if (!inQuotes &&
+          character == delimiter) {
+        fields.add(
+          field.toString().trim(),
+        );
         field.clear();
         continue;
       }
@@ -734,12 +958,16 @@ class RecordingImportService {
       field.write(character);
     }
 
-    fields.add(field.toString().trim());
+    fields.add(
+      field.toString().trim(),
+    );
 
     return fields;
   }
 
-  bool _isEmptyRow(List<String> row) {
+  bool _isEmptyRow(
+    List<String> row,
+  ) {
     if (row.isEmpty) {
       return true;
     }
@@ -753,12 +981,24 @@ class RecordingImportService {
     return true;
   }
 
-  _CsvColumnMap _detectColumns(List<String> firstRow) {
-    final normalized = firstRow.map(_normalizeHeader).toList(growable: false);
+  _CsvColumnMap _detectColumns(
+    List<String> firstRow,
+  ) {
+    final normalized = firstRow
+        .map(_normalizeHeader)
+        .toList(
+          growable: false,
+        );
 
-    int? find(Set<String> aliases) {
-      for (int i = 0; i < normalized.length; i++) {
-        if (aliases.contains(normalized[i])) {
+    int? find(
+      Set<String> aliases,
+    ) {
+      for (int i = 0;
+          i < normalized.length;
+          i++) {
+        if (aliases.contains(
+          normalized[i],
+        )) {
           return i;
         }
       }
@@ -766,62 +1006,76 @@ class RecordingImportService {
       return null;
     }
 
-    final ecgIndex = find(const <String>{
-      'ecg',
-      'ecgraw',
-      'ecgsignal',
-      'ch1',
-      'channel1',
-      'lead1',
-      'lead',
-    });
+    final ecgIndex = find(
+      const <String>{
+        'ecg',
+        'ecgraw',
+        'ecgsignal',
+        'ch1',
+        'channel1',
+        'lead1',
+        'lead',
+      },
+    );
 
-    final respirationIndex = find(const <String>{
-      'respiration',
-      'resp',
-      'respraw',
-      'respiratory',
-      'breathing',
-      'ch2',
-      'channel2',
-    });
+    final respirationIndex = find(
+      const <String>{
+        'respiration',
+        'resp',
+        'respraw',
+        'respiratory',
+        'breathing',
+        'ch2',
+        'channel2',
+      },
+    );
 
-    final timeIndex = find(const <String>{
-      'time',
-      'timestamp',
-      'elapsed',
-      'elapsedtime',
-      'elapsedms',
-      'elapsedus',
-      'times',
-      'timems',
-      'timeus',
-      'timestampms',
-      'timestampus',
-      'seconds',
-      'milliseconds',
-      'microseconds',
-      't',
-    });
+    final timeIndex = find(
+      const <String>{
+        'time',
+        'timestamp',
+        'elapsed',
+        'elapsedtime',
+        'elapsedms',
+        'elapsedus',
+        'times',
+        'timems',
+        'timeus',
+        'timestampms',
+        'timestampus',
+        'seconds',
+        'milliseconds',
+        'microseconds',
+        't',
+      },
+    );
 
     final hasHeader =
         ecgIndex != null ||
         respirationIndex != null ||
         timeIndex != null ||
         firstRow.any(
-          (value) => double.tryParse(_normalizeNumber(value)) == null,
+          (value) =>
+              double.tryParse(
+                _normalizeNumber(value),
+              ) ==
+              null,
         );
 
     if (hasHeader) {
-      final resolvedEcg =
-          ecgIndex ??
+      final resolvedEcg = ecgIndex ??
           _firstSignalColumn(
             firstRow.length,
-            excluded: <int?>{timeIndex, respirationIndex},
+            excluded: <int?>{
+              timeIndex,
+              respirationIndex,
+            },
           );
 
       if (resolvedEcg == null) {
-        throw const FormatException('CSV does not contain an ECG column.');
+        throw const FormatException(
+          'CSV does not contain an ECG column.',
+        );
       }
 
       return _CsvColumnMap(
@@ -829,7 +1083,9 @@ class RecordingImportService {
         timeIndex: timeIndex,
         ecgIndex: resolvedEcg,
         respirationIndex: respirationIndex,
-        timeHeader: timeIndex == null ? null : normalized[timeIndex],
+        timeHeader: timeIndex == null
+            ? null
+            : normalized[timeIndex],
       );
     }
 
@@ -862,7 +1118,10 @@ class RecordingImportService {
     );
   }
 
-  int? _firstSignalColumn(int columnCount, {required Set<int?> excluded}) {
+  int? _firstSignalColumn(
+    int columnCount, {
+    required Set<int?> excluded,
+  }) {
     for (int i = 0; i < columnCount; i++) {
       if (!excluded.contains(i)) {
         return i;
@@ -872,46 +1131,79 @@ class RecordingImportService {
     return null;
   }
 
-  String _normalizeHeader(String value) {
-    return value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  String _normalizeHeader(
+    String value,
+  ) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(
+          RegExp(r'[^a-z0-9]'),
+          '',
+        );
   }
 
-  String _normalizeNumber(String value) {
+  String _normalizeNumber(
+    String value,
+  ) {
     final trimmed = value.trim();
 
-    if (trimmed.contains(',') && !trimmed.contains('.')) {
-      return trimmed.replaceAll(',', '.');
+    if (trimmed.contains(',') &&
+        !trimmed.contains('.')) {
+      return trimmed.replaceAll(
+        ',',
+        '.',
+      );
     }
 
     return trimmed;
   }
 
-  _CsvInputRow? _parseCsvDataRow(List<String> row, _CsvColumnMap columns) {
+  _CsvInputRow? _parseCsvDataRow(
+    List<String> row,
+    _CsvColumnMap columns,
+  ) {
     if (columns.ecgIndex >= row.length) {
       return null;
     }
 
-    final ecg = double.tryParse(_normalizeNumber(row[columns.ecgIndex]));
+    final ecg = double.tryParse(
+      _normalizeNumber(
+        row[columns.ecgIndex],
+      ),
+    );
 
-    if (ecg == null || !ecg.isFinite) {
+    if (ecg == null ||
+        !ecg.isFinite) {
       return null;
     }
 
     double respiration = 0;
 
-    final respirationIndex = columns.respirationIndex;
+    final respirationIndex =
+        columns.respirationIndex;
 
-    if (respirationIndex != null && respirationIndex < row.length) {
-      respiration =
-          double.tryParse(_normalizeNumber(row[respirationIndex])) ?? 0;
+    if (respirationIndex != null &&
+        respirationIndex < row.length) {
+      respiration = double.tryParse(
+            _normalizeNumber(
+              row[respirationIndex],
+            ),
+          ) ??
+          0;
     }
 
     double? time;
 
     final timeIndex = columns.timeIndex;
 
-    if (timeIndex != null && timeIndex < row.length) {
-      time = double.tryParse(_normalizeNumber(row[timeIndex]));
+    if (timeIndex != null &&
+        timeIndex < row.length) {
+      time = double.tryParse(
+        _normalizeNumber(
+          row[timeIndex],
+        ),
+      );
     }
 
     return _CsvInputRow(
@@ -921,12 +1213,21 @@ class RecordingImportService {
     );
   }
 
-  _CsvTiming _inferCsvTiming(List<_CsvInputRow> rows, String? timeHeader) {
+  _CsvTiming _inferCsvTiming(
+    List<_CsvInputRow> rows,
+    String? timeHeader,
+  ) {
     final rawTimes = rows
-        .map((row) => row.rawTime)
+        .map(
+          (row) => row.rawTime,
+        )
         .whereType<double>()
-        .where((value) => value.isFinite)
-        .toList(growable: false);
+        .where(
+          (value) => value.isFinite,
+        )
+        .toList(
+          growable: false,
+        );
 
     if (rawTimes.length < 2) {
       return const _CsvTiming(
@@ -939,10 +1240,14 @@ class RecordingImportService {
 
     final positiveDeltas = <double>[];
 
-    for (int i = 1; i < rawTimes.length; i++) {
-      final delta = rawTimes[i] - rawTimes[i - 1];
+    for (int i = 1;
+        i < rawTimes.length;
+        i++) {
+      final delta =
+          rawTimes[i] - rawTimes[i - 1];
 
-      if (delta > 0 && delta.isFinite) {
+      if (delta > 0 &&
+          delta.isFinite) {
         positiveDeltas.add(delta);
       }
     }
@@ -958,20 +1263,36 @@ class RecordingImportService {
 
     positiveDeltas.sort();
 
-    final medianDelta = positiveDeltas[positiveDeltas.length ~/ 2];
+    final medianDelta =
+        positiveDeltas[
+          positiveDeltas.length ~/ 2
+        ];
 
-    final multiplier = _inferTimeMultiplierUs(medianDelta, timeHeader);
+    final multiplier = _inferTimeMultiplierUs(
+      medianDelta,
+      timeHeader,
+    );
 
-    final samplePeriodUs = medianDelta * multiplier;
+    final samplePeriodUs =
+        medianDelta * multiplier;
 
-    var sampleRate = Duration.microsecondsPerSecond / samplePeriodUs;
+    var sampleRate =
+        Duration.microsecondsPerSecond /
+        samplePeriodUs;
 
-    if (!sampleRate.isFinite || sampleRate < 1 || sampleRate > 10000) {
-      sampleRate = _defaultSampleRate.toDouble();
+    if (!sampleRate.isFinite ||
+        sampleRate < 1 ||
+        sampleRate > 10000) {
+      sampleRate =
+          _defaultSampleRate.toDouble();
     }
 
     final rawStart = rawTimes.first;
-    final absoluteStartMs = _inferAbsoluteStartMs(rawStart, multiplier);
+    final absoluteStartMs =
+        _inferAbsoluteStartMs(
+      rawStart,
+      multiplier,
+    );
 
     return _CsvTiming(
       sampleRate: sampleRate,
@@ -981,7 +1302,10 @@ class RecordingImportService {
     );
   }
 
-  double _inferTimeMultiplierUs(double medianDelta, String? header) {
+  double _inferTimeMultiplierUs(
+    double medianDelta,
+    String? header,
+  ) {
     if (header != null) {
       if (header.contains('microsecond') ||
           header.contains('timeus') ||
@@ -997,7 +1321,8 @@ class RecordingImportService {
         return 1000;
       }
 
-      if (header == 'seconds' || header == 'times') {
+      if (header == 'seconds' ||
+          header == 'times') {
         return 1000000;
       }
     }
@@ -1013,24 +1338,37 @@ class RecordingImportService {
     return 1;
   }
 
-  int? _inferAbsoluteStartMs(double rawStart, double multiplierUs) {
-    final microseconds = rawStart * multiplierUs;
+  int? _inferAbsoluteStartMs(
+    double rawStart,
+    double multiplierUs,
+  ) {
+    final microseconds =
+        rawStart * multiplierUs;
 
-    final milliseconds = microseconds / Duration.microsecondsPerMillisecond;
+    final milliseconds =
+        microseconds /
+        Duration.microsecondsPerMillisecond;
 
-    final earliest = DateTime.utc(2000).millisecondsSinceEpoch;
+    final earliest =
+        DateTime.utc(2000).millisecondsSinceEpoch;
 
-    final latest = DateTime.utc(2200).millisecondsSinceEpoch;
+    final latest =
+        DateTime.utc(2200).millisecondsSinceEpoch;
 
-    if (milliseconds >= earliest && milliseconds <= latest) {
+    if (milliseconds >= earliest &&
+        milliseconds <= latest) {
       return milliseconds.round();
     }
 
     return null;
   }
 
-  String _baseNameWithoutExtension(String name) {
-    final base = p.basenameWithoutExtension(name).trim();
+  String _baseNameWithoutExtension(
+    String name,
+  ) {
+    final base = p.basenameWithoutExtension(
+      name,
+    ).trim();
 
     if (base.isEmpty) {
       return 'Imported recording';
@@ -1039,17 +1377,26 @@ class RecordingImportService {
     return base;
   }
 
-  int _readRequiredInt(Map<String, Object?> row, String key) {
-    final value = _readInt(row[key]);
+  int _readRequiredInt(
+    Map<String, Object?> row,
+    String key,
+  ) {
+    final value = _readInt(
+      row[key],
+    );
 
     if (value == null) {
-      throw FormatException('Missing integer field: $key');
+      throw FormatException(
+        'Missing integer field: $key',
+      );
     }
 
     return value;
   }
 
-  int? _readInt(Object? value) {
+  int? _readInt(
+    Object? value,
+  ) {
     if (value is int) {
       return value;
     }
@@ -1065,7 +1412,9 @@ class RecordingImportService {
     return null;
   }
 
-  double? _readDouble(Object? value) {
+  double? _readDouble(
+    Object? value,
+  ) {
     if (value is double) {
       return value;
     }
@@ -1081,7 +1430,9 @@ class RecordingImportService {
     return null;
   }
 
-  String? _readString(Object? value) {
+  String? _readString(
+    Object? value,
+  ) {
     if (value == null) {
       return null;
     }
@@ -1089,13 +1440,17 @@ class RecordingImportService {
     return value.toString();
   }
 
-  Uint8List? _asUint8List(Object? value) {
+  Uint8List? _asUint8List(
+    Object? value,
+  ) {
     if (value is Uint8List) {
       return value;
     }
 
     if (value is List<int>) {
-      return Uint8List.fromList(value);
+      return Uint8List.fromList(
+        value,
+      );
     }
 
     return null;
@@ -1107,9 +1462,11 @@ class _CsvRecordingWriter {
   final int recordingId;
   final double sampleRate;
 
-  final List<_CsvStoredSample> _chunk = <_CsvStoredSample>[];
+  final List<_CsvStoredSample> _chunk =
+      <_CsvStoredSample>[];
 
-  final List<_GapToInsert> _pendingGaps = <_GapToInsert>[];
+  final List<_GapToInsert> _pendingGaps =
+      <_GapToInsert>[];
 
   int _chunkIndex = 0;
   int _sampleCount = 0;
@@ -1131,14 +1488,24 @@ class _CsvRecordingWriter {
   });
 
   int get sampleCount => _sampleCount;
-  int get lastCommittedElapsedUs => _lastCommittedElapsedUs;
-  int get timelineDurationUs => _timelineDurationUs;
+  int get lastCommittedElapsedUs =>
+      _lastCommittedElapsedUs;
+  int get timelineDurationUs =>
+      _timelineDurationUs;
 
-  int get _samplePeriodUs =>
-      (Duration.microsecondsPerSecond / sampleRate).round();
+  int get _samplePeriodUs => (
+        Duration.microsecondsPerSecond /
+        sampleRate
+      ).round();
 
-  Future<void> add(_CsvInputRow row, _CsvTiming timing) async {
-    final inputTimeUs = _resolveInputTimeUs(row, timing);
+  Future<void> add(
+    _CsvInputRow row,
+    _CsvTiming timing,
+  ) async {
+    final inputTimeUs = _resolveInputTimeUs(
+      row,
+      timing,
+    );
 
     if (_firstInputTimeUs == null) {
       _firstInputTimeUs = inputTimeUs;
@@ -1151,22 +1518,34 @@ class _CsvRecordingWriter {
         : inputTimeUs - (_firstInputTimeUs ?? inputTimeUs);
 
     if (relativeTimeUs < 0) {
-      throw const FormatException('CSV timestamps must be monotonic.');
+      throw const FormatException(
+        'CSV timestamps must be monotonic.',
+      );
     }
 
-    final previousInput = _previousInputTimeUs;
+    final previousInput =
+        _previousInputTimeUs;
 
     if (inputTimeUs != null &&
         previousInput != null &&
         inputTimeUs < previousInput) {
-      throw const FormatException('CSV timestamps must be monotonic.');
+      throw const FormatException(
+        'CSV timestamps must be monotonic.',
+      );
     }
 
-    final expectedTimeUs = _nextLogicalTimeUs ?? relativeTimeUs;
+    final expectedTimeUs =
+        _nextLogicalTimeUs ?? relativeTimeUs;
 
-    final gapThreshold = math.max(_samplePeriodUs * 3, 20000);
+    final gapThreshold =
+        math.max(
+          _samplePeriodUs * 3,
+          20000,
+        );
 
-    if (_sampleCount > 0 && relativeTimeUs - expectedTimeUs > gapThreshold) {
+    if (_sampleCount > 0 &&
+        relativeTimeUs - expectedTimeUs >
+            gapThreshold) {
       await _flushChunk();
 
       _pendingGaps.add(
@@ -1177,39 +1556,65 @@ class _CsvRecordingWriter {
         ),
       );
 
-      _timelineDurationUs = math.max(_timelineDurationUs, relativeTimeUs);
+      _timelineDurationUs = math.max(
+        _timelineDurationUs,
+        relativeTimeUs,
+      );
 
-      _nextLogicalTimeUs = relativeTimeUs;
+      _nextLogicalTimeUs =
+          relativeTimeUs;
     } else if (_sampleCount > 0) {
-      relativeTimeUs = expectedTimeUs;
+      relativeTimeUs =
+          expectedTimeUs;
     }
 
-    _chunkStartUs ??= _nextLogicalTimeUs ?? relativeTimeUs;
+    _chunkStartUs ??=
+        _nextLogicalTimeUs ??
+        relativeTimeUs;
 
-    _chunk.add(_CsvStoredSample(ecg: row.ecg, respiration: row.respiration));
+    _chunk.add(
+      _CsvStoredSample(
+        ecg: row.ecg,
+        respiration: row.respiration,
+      ),
+    );
 
     _sampleCount++;
-    _previousInputTimeUs = inputTimeUs ?? _previousInputTimeUs;
+    _previousInputTimeUs =
+        inputTimeUs ?? _previousInputTimeUs;
 
     _nextLogicalTimeUs =
-        (_nextLogicalTimeUs ?? relativeTimeUs) + _samplePeriodUs;
+        (_nextLogicalTimeUs ??
+                relativeTimeUs) +
+            _samplePeriodUs;
 
-    _timelineDurationUs = math.max(_timelineDurationUs, _nextLogicalTimeUs!);
+    _timelineDurationUs = math.max(
+      _timelineDurationUs,
+      _nextLogicalTimeUs!,
+    );
 
-    if (_chunk.length >= RecordingImportService._chunkSamples) {
+    if (_chunk.length >=
+        RecordingImportService._chunkSamples) {
       await _flushChunk();
     }
   }
 
-  int? _resolveInputTimeUs(_CsvInputRow row, _CsvTiming timing) {
+  int? _resolveInputTimeUs(
+    _CsvInputRow row,
+    _CsvTiming timing,
+  ) {
     final rawTime = row.rawTime;
-    final multiplier = timing.timeMultiplierUs;
+    final multiplier =
+        timing.timeMultiplierUs;
 
-    if (rawTime == null || multiplier == null) {
+    if (rawTime == null ||
+        multiplier == null) {
       return null;
     }
 
-    return (rawTime * multiplier).round();
+    return (
+      rawTime * multiplier
+    ).round();
   }
 
   Future<void> finish() async {
@@ -1222,46 +1627,63 @@ class _CsvRecordingWriter {
       return;
     }
 
-    final startUs = _chunkStartUs ?? _lastCommittedElapsedUs;
+    final startUs =
+        _chunkStartUs ??
+        _lastCommittedElapsedUs;
 
-    final signalData = _encodeSamples(_chunk);
+    final signalData =
+        _encodeSamples(_chunk);
 
-    final endUs = startUs + _chunk.length * _samplePeriodUs;
+    final endUs = startUs +
+        _chunk.length * _samplePeriodUs;
 
-    final batch = _batch ??= database.batch();
+    final batch =
+        _batch ??= database.batch();
 
-    batch.insert('signal_chunks', <String, Object?>{
-      'recording_id': recordingId,
-      'chunk_index': _chunkIndex,
-      'start_elapsed_us': startUs,
-      'end_elapsed_us': endUs,
-      'sample_count': _chunk.length,
-      'encoding_version': 1,
-      'signal_data': signalData,
-    }, conflictAlgorithm: ConflictAlgorithm.abort);
+    batch.insert(
+      'signal_chunks',
+      <String, Object?>{
+        'recording_id': recordingId,
+        'chunk_index': _chunkIndex,
+        'start_elapsed_us': startUs,
+        'end_elapsed_us': endUs,
+        'sample_count': _chunk.length,
+        'encoding_version': 1,
+        'signal_data': signalData,
+      },
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
 
     _pendingBatchOperations++;
     _chunkIndex++;
-    _lastCommittedElapsedUs = math.max(_lastCommittedElapsedUs, endUs);
+    _lastCommittedElapsedUs = math.max(
+      _lastCommittedElapsedUs,
+      endUs,
+    );
 
     _chunk.clear();
     _chunkStartUs = null;
 
     while (_pendingGaps.isNotEmpty) {
-      final gap = _pendingGaps.removeAt(0);
+      final gap =
+          _pendingGaps.removeAt(0);
 
-      batch.insert('recording_gaps', <String, Object?>{
-        'recording_id': recordingId,
-        'start_elapsed_us': gap.startUs,
-        'end_elapsed_us': gap.endUs,
-        'reason': gap.reason,
-        'details': null,
-      });
+      batch.insert(
+        'recording_gaps',
+        <String, Object?>{
+          'recording_id': recordingId,
+          'start_elapsed_us': gap.startUs,
+          'end_elapsed_us': gap.endUs,
+          'reason': gap.reason,
+          'details': null,
+        },
+      );
 
       _pendingBatchOperations++;
     }
 
-    if (_pendingBatchOperations >= RecordingImportService._batchChunkCount) {
+    if (_pendingBatchOperations >=
+        RecordingImportService._batchChunkCount) {
       await _flushDatabaseBatch();
     }
   }
@@ -1269,26 +1691,44 @@ class _CsvRecordingWriter {
   Future<void> _flushDatabaseBatch() async {
     final batch = _batch;
 
-    if (batch == null || _pendingBatchOperations == 0) {
+    if (batch == null ||
+        _pendingBatchOperations == 0) {
       return;
     }
 
-    await batch.commit(noResult: true, continueOnError: false);
+    await batch.commit(
+      noResult: true,
+      continueOnError: false,
+    );
 
     _batch = null;
     _pendingBatchOperations = 0;
   }
 
-  Uint8List _encodeSamples(List<_CsvStoredSample> samples) {
-    final data = ByteData(samples.length * 8);
+  Uint8List _encodeSamples(
+    List<_CsvStoredSample> samples,
+  ) {
+    final data = ByteData(
+      samples.length * 8,
+    );
 
-    for (int i = 0; i < samples.length; i++) {
+    for (int i = 0;
+        i < samples.length;
+        i++) {
       final offset = i * 8;
       final sample = samples[i];
 
-      data.setInt32(offset, sample.ecg, Endian.little);
+      data.setInt32(
+        offset,
+        sample.ecg,
+        Endian.little,
+      );
 
-      data.setInt32(offset + 4, sample.respiration, Endian.little);
+      data.setInt32(
+        offset + 4,
+        sample.respiration,
+        Endian.little,
+      );
     }
 
     return data.buffer.asUint8List();
@@ -1341,7 +1781,10 @@ class _CsvStoredSample {
   final int ecg;
   final int respiration;
 
-  const _CsvStoredSample({required this.ecg, required this.respiration});
+  const _CsvStoredSample({
+    required this.ecg,
+    required this.respiration,
+  });
 }
 
 class _GapToInsert {
