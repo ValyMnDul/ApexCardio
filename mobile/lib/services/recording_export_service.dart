@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -34,7 +33,7 @@ class RecordingExportService {
 
   final RecordingDatabase _database = RecordingDatabase.instance;
 
-  static const int _chunkPageSize = 400;
+  static const int _pageSize = 250;
 
   Future<RecordingExportResult> exportToTemporaryFile({
     required int recordingId,
@@ -51,61 +50,57 @@ class RecordingExportService {
     final status = recording['status'] as String? ?? 'completed';
 
     if (status == 'recording' || status == 'paused') {
-      throw StateError('Stop the active recording before exporting it.');
+      throw StateError('Stop the recording before exporting it.');
     }
 
-    final tempDirectory = await getTemporaryDirectory();
-    final exportDirectory = Directory(
-      p.join(tempDirectory.path, 'apexcardio_exports'),
+    final root = Directory(
+      p.join((await getTemporaryDirectory()).path, 'apexcardio_exports'),
     );
 
-    if (!await exportDirectory.exists()) {
-      await exportDirectory.create(recursive: true);
+    if (!await root.exists()) {
+      await root.create(recursive: true);
     }
 
     final name = _safeFileName(recording['name'] as String? ?? 'recording');
-
     final uid = recording['recording_uid'] as String?;
     final suffix = uid == null || uid.isEmpty
         ? recordingId.toString()
         : _shortUid(uid);
 
-    switch (format) {
-      case RecordingExportFormat.apex:
-        final fileName = '${name}_$suffix.apex';
-        final filePath = p.join(exportDirectory.path, fileName);
+    if (format == RecordingExportFormat.apex) {
+      final fileName = '${name}_$suffix.apex';
+      final filePath = p.join(root.path, fileName);
 
-        await _exportApexDatabase(
-          recordingId: recordingId,
-          recording: recording,
-          destinationPath: filePath,
-        );
+      await _exportApex(
+        recordingId: recordingId,
+        recording: recording,
+        destinationPath: filePath,
+      );
 
-        return RecordingExportResult(
-          format: format,
-          fileName: fileName,
-          filePath: filePath,
-        );
-
-      case RecordingExportFormat.csv:
-        final fileName = '${name}_$suffix.csv';
-        final filePath = p.join(exportDirectory.path, fileName);
-
-        await _exportCsv(
-          recordingId: recordingId,
-          recording: recording,
-          destinationPath: filePath,
-        );
-
-        return RecordingExportResult(
-          format: format,
-          fileName: fileName,
-          filePath: filePath,
-        );
+      return RecordingExportResult(
+        format: format,
+        fileName: fileName,
+        filePath: filePath,
+      );
     }
+
+    final fileName = '${name}_$suffix.csv';
+    final filePath = p.join(root.path, fileName);
+
+    await _exportCsv(
+      recordingId: recordingId,
+      recording: recording,
+      destinationPath: filePath,
+    );
+
+    return RecordingExportResult(
+      format: format,
+      fileName: fileName,
+      filePath: filePath,
+    );
   }
 
-  Future<bool> export({
+  Future<void> export({
     required int recordingId,
     required RecordingExportFormat format,
     Rect? sharePositionOrigin,
@@ -115,38 +110,55 @@ class RecordingExportService {
       format: format,
     );
 
+    final file = File(result.filePath);
+
+    if (!await file.exists() || await file.length() <= 0) {
+      throw StateError('The export file was not created correctly.');
+    }
+
     if (Platform.isAndroid || Platform.isIOS) {
       final shareResult = await SharePlus.instance.share(
         ShareParams(
           files: <XFile>[
-            XFile(result.filePath, mimeType: _mimeType(result.format)),
+            XFile(
+              result.filePath,
+              mimeType: format == RecordingExportFormat.csv
+                  ? 'text/csv'
+                  : 'application/octet-stream',
+            ),
           ],
           fileNameOverrides: <String>[result.fileName],
-          title: 'ApexCardio recording',
+          title: format == RecordingExportFormat.apex
+              ? 'ApexCardio recording'
+              : 'ApexCardio CSV',
           subject: result.fileName,
           sharePositionOrigin: sharePositionOrigin,
         ),
       );
 
-      return shareResult.status != ShareResultStatus.unavailable;
+      if (shareResult.status == ShareResultStatus.unavailable) {
+        throw StateError('The system share sheet is unavailable.');
+      }
+
+      return;
     }
 
-    const apexType = XTypeGroup(
-      label: 'ApexCardio recording',
-      extensions: <String>['apex'],
-    );
-
-    const csvType = XTypeGroup(label: 'CSV', extensions: <String>['csv']);
-
-    final location = await getSaveLocation(
-      suggestedName: result.fileName,
-      acceptedTypeGroups: <XTypeGroup>[
-        result.format == RecordingExportFormat.apex ? apexType : csvType,
+    final type = XTypeGroup(
+      label: format == RecordingExportFormat.apex
+          ? 'ApexCardio recording'
+          : 'CSV',
+      extensions: <String>[
+        format == RecordingExportFormat.apex ? 'apex' : 'csv',
       ],
     );
 
+    final location = await getSaveLocation(
+      suggestedName: result.fileName,
+      acceptedTypeGroups: <XTypeGroup>[type],
+    );
+
     if (location == null) {
-      return false;
+      return;
     }
 
     final destination = File(location.path);
@@ -155,72 +167,70 @@ class RecordingExportService {
       await destination.delete();
     }
 
-    await File(result.filePath).copy(destination.path);
-
-    return true;
+    await file.copy(destination.path);
   }
 
-  Future<void> _exportApexDatabase({
+  Future<void> _exportApex({
     required int recordingId,
     required Map<String, Object?> recording,
     required String destinationPath,
   }) async {
-    final destinationFile = File(destinationPath);
+    final output = File(destinationPath);
 
-    if (await destinationFile.exists()) {
-      await destinationFile.delete();
+    if (await output.exists()) {
+      await output.delete();
     }
 
-    final sourceDb = await _database.database;
-    Database? destinationDb;
+    final source = await _database.database;
+    Database? destination;
 
     try {
-      destinationDb = await openDatabase(
+      destination = await openDatabase(
         destinationPath,
-        version: RecordingDatabase.schemaVersion,
+        version: 1,
         singleInstance: false,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
-          await db.execute('PRAGMA journal_mode = DELETE');
         },
         onCreate: (db, version) async {
-          await _createExportSchema(db);
+          await _createApexSchema(db);
         },
       );
 
-      final exportedRecording = Map<String, Object?>.from(recording);
+      final recordingCopy = Map<String, Object?>.from(recording);
+      recordingCopy['id'] = 1;
 
-      exportedRecording['id'] = 1;
-
-      await destinationDb.insert(
+      await destination.insert(
         'recordings',
-        exportedRecording,
+        recordingCopy,
         conflictAlgorithm: ConflictAlgorithm.abort,
       );
+
+      await destination.insert('apex_manifest', <String, Object?>{
+        'format': 'ApexCardio Recording',
+        'format_version': 1,
+        'created_at_ms': DateTime.now().millisecondsSinceEpoch,
+      });
 
       var lastChunkIndex = -1;
 
       while (true) {
-        final rows = await sourceDb.query(
+        final rows = await source.query(
           'signal_chunks',
-          where: '''
-            recording_id = ?
-            AND chunk_index > ?
-          ''',
+          where: 'recording_id = ? AND chunk_index > ?',
           whereArgs: <Object?>[recordingId, lastChunkIndex],
           orderBy: 'chunk_index ASC',
-          limit: _chunkPageSize,
+          limit: _pageSize,
         );
 
         if (rows.isEmpty) {
           break;
         }
 
-        final batch = destinationDb.batch();
+        final batch = destination.batch();
 
         for (final row in rows) {
           final copy = Map<String, Object?>.from(row);
-
           copy.remove('id');
           copy['recording_id'] = 1;
 
@@ -230,13 +240,8 @@ class RecordingExportService {
             conflictAlgorithm: ConflictAlgorithm.abort,
           );
 
-          final chunkIndex = row['chunk_index'];
-
-          if (chunkIndex is int) {
-            lastChunkIndex = chunkIndex;
-          } else if (chunkIndex is num) {
-            lastChunkIndex = chunkIndex.toInt();
-          }
+          lastChunkIndex =
+              (row['chunk_index'] as num?)?.toInt() ?? lastChunkIndex;
         }
 
         await batch.commit(noResult: true, continueOnError: false);
@@ -245,26 +250,22 @@ class RecordingExportService {
       var lastGapId = 0;
 
       while (true) {
-        final rows = await sourceDb.query(
+        final rows = await source.query(
           'recording_gaps',
-          where: '''
-            recording_id = ?
-            AND id > ?
-          ''',
+          where: 'recording_id = ? AND id > ?',
           whereArgs: <Object?>[recordingId, lastGapId],
           orderBy: 'id ASC',
-          limit: _chunkPageSize,
+          limit: _pageSize,
         );
 
         if (rows.isEmpty) {
           break;
         }
 
-        final batch = destinationDb.batch();
+        final batch = destination.batch();
 
         for (final row in rows) {
           final copy = Map<String, Object?>.from(row);
-
           copy.remove('id');
           copy['recording_id'] = 1;
 
@@ -274,47 +275,34 @@ class RecordingExportService {
             conflictAlgorithm: ConflictAlgorithm.abort,
           );
 
-          final gapId = row['id'];
-
-          if (gapId is int) {
-            lastGapId = gapId;
-          } else if (gapId is num) {
-            lastGapId = gapId.toInt();
-          }
+          lastGapId = (row['id'] as num?)?.toInt() ?? lastGapId;
         }
 
         await batch.commit(noResult: true, continueOnError: false);
       }
 
-      final check = await destinationDb.rawQuery('PRAGMA quick_check(1)');
+      await destination.execute('PRAGMA user_version = 1');
+
+      final check = await destination.rawQuery('PRAGMA quick_check(1)');
 
       if (check.isEmpty ||
           check.first.values.first?.toString().toLowerCase() != 'ok') {
-        throw StateError(
-          'Exported ApexCardio database failed integrity check.',
-        );
+        throw StateError('The ApexCardio export failed its integrity check.');
       }
 
-      await destinationDb.close();
-      destinationDb = null;
+      await destination.close();
+      destination = null;
 
-      final wal = File('$destinationPath-wal');
-      final shm = File('$destinationPath-shm');
-
-      if (await wal.exists()) {
-        await wal.delete();
-      }
-
-      if (await shm.exists()) {
-        await shm.delete();
+      if (!await output.exists() || await output.length() <= 0) {
+        throw StateError('The ApexCardio export file is empty.');
       }
     } catch (_) {
-      if (destinationDb != null && destinationDb.isOpen) {
-        await destinationDb.close();
+      if (destination != null && destination.isOpen) {
+        await destination.close();
       }
 
-      if (await destinationFile.exists()) {
-        await destinationFile.delete();
+      if (await output.exists()) {
+        await output.delete();
       }
 
       rethrow;
@@ -326,38 +314,33 @@ class RecordingExportService {
     required Map<String, Object?> recording,
     required String destinationPath,
   }) async {
-    final file = File(destinationPath);
+    final output = File(destinationPath);
 
-    if (await file.exists()) {
-      await file.delete();
+    if (await output.exists()) {
+      await output.delete();
     }
 
     final sampleRate = (recording['sample_rate'] as num?)?.toDouble() ?? 250.0;
 
     if (!sampleRate.isFinite || sampleRate <= 0) {
-      throw StateError('Recording has an invalid sample rate.');
+      throw StateError('Invalid sample rate.');
     }
 
-    final samplePeriodUs = Duration.microsecondsPerSecond / sampleRate;
-
     final db = await _database.database;
-    final sink = file.openWrite(mode: FileMode.writeOnly, encoding: utf8);
+    final sink = output.openWrite(mode: FileMode.writeOnly, encoding: utf8);
+    final samplePeriodUs = 1000000.0 / sampleRate;
 
     try {
       sink.writeln('elapsed_us,elapsed_s,ecg,respiration');
-
       var lastChunkIndex = -1;
 
       while (true) {
         final rows = await db.query(
           'signal_chunks',
-          where: '''
-            recording_id = ?
-            AND chunk_index > ?
-          ''',
+          where: 'recording_id = ? AND chunk_index > ?',
           whereArgs: <Object?>[recordingId, lastChunkIndex],
           orderBy: 'chunk_index ASC',
-          limit: _chunkPageSize,
+          limit: _pageSize,
         );
 
         if (rows.isEmpty) {
@@ -365,60 +348,40 @@ class RecordingExportService {
         }
 
         for (final row in rows) {
-          final encodingVersion = row['encoding_version'] as int? ?? 1;
-
-          if (encodingVersion != 1) {
-            throw StateError(
-              'Unsupported signal encoding version: $encodingVersion',
-            );
-          }
-
           final sampleCount = row['sample_count'] as int? ?? 0;
+          final startUs = row['start_elapsed_us'] as int? ?? 0;
+          final raw = row['signal_data'];
+          final bytes = switch (raw) {
+            Uint8List value => value,
+            List<int> value => Uint8List.fromList(value),
+            _ => null,
+          };
 
-          final startElapsedUs = row['start_elapsed_us'] as int? ?? 0;
-
-          final bytes = _asUint8List(row['signal_data']);
-
-          if (sampleCount <= 0 ||
-              bytes == null ||
-              bytes.length != sampleCount * 8) {
+          if (bytes == null ||
+              sampleCount <= 0 ||
+              bytes.length < sampleCount * 8) {
             throw StateError('Corrupted signal chunk.');
           }
 
-          final byteData = ByteData.sublistView(bytes);
-
+          final data = ByteData.sublistView(bytes);
           final buffer = StringBuffer();
 
-          for (int index = 0; index < sampleCount; index++) {
-            final offset = index * 8;
-
-            final ecg = byteData.getInt32(offset, Endian.little);
-
-            final respiration = byteData.getInt32(offset + 4, Endian.little);
-
-            final elapsedUs = startElapsedUs + (index * samplePeriodUs).round();
-
-            final elapsedSeconds = elapsedUs / Duration.microsecondsPerSecond;
-
+          for (int i = 0; i < sampleCount; i++) {
+            final offset = i * 8;
+            final elapsedUs = startUs + (i * samplePeriodUs).round();
             buffer
               ..write(elapsedUs)
               ..write(',')
-              ..write(elapsedSeconds.toStringAsFixed(6))
+              ..write((elapsedUs / 1000000.0).toStringAsFixed(6))
               ..write(',')
-              ..write(ecg)
+              ..write(data.getInt32(offset, Endian.little))
               ..write(',')
-              ..writeln(respiration);
+              ..writeln(data.getInt32(offset + 4, Endian.little));
           }
 
           sink.write(buffer.toString());
-
-          final chunkIndex = row['chunk_index'];
-
-          if (chunkIndex is int) {
-            lastChunkIndex = chunkIndex;
-          } else if (chunkIndex is num) {
-            lastChunkIndex = chunkIndex.toInt();
-          }
+          lastChunkIndex =
+              (row['chunk_index'] as num?)?.toInt() ?? lastChunkIndex;
         }
 
         await sink.flush();
@@ -429,15 +392,24 @@ class RecordingExportService {
     } catch (_) {
       await sink.close();
 
-      if (await file.exists()) {
-        await file.delete();
+      if (await output.exists()) {
+        await output.delete();
       }
 
       rethrow;
     }
   }
 
-  Future<void> _createExportSchema(Database db) async {
+  Future<void> _createApexSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE apex_manifest (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        format TEXT NOT NULL,
+        format_version INTEGER NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE recordings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -452,15 +424,9 @@ class RecordingExportService {
         status TEXT NOT NULL CHECK(
           status IN ('recording', 'paused', 'completed', 'interrupted')
         ),
-        timeline_duration_us INTEGER NOT NULL DEFAULT 0 CHECK(
-          timeline_duration_us >= 0
-        ),
-        recorded_sample_count INTEGER NOT NULL DEFAULT 0 CHECK(
-          recorded_sample_count >= 0
-        ),
-        last_committed_elapsed_us INTEGER NOT NULL DEFAULT 0 CHECK(
-          last_committed_elapsed_us >= 0
-        ),
+        timeline_duration_us INTEGER NOT NULL DEFAULT 0,
+        recorded_sample_count INTEGER NOT NULL DEFAULT 0,
+        last_committed_elapsed_us INTEGER NOT NULL DEFAULT 0,
         last_heartbeat_at_ms INTEGER NOT NULL,
         created_at_ms INTEGER NOT NULL,
         updated_at_ms INTEGER NOT NULL
@@ -471,10 +437,10 @@ class RecordingExportService {
       CREATE TABLE signal_chunks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recording_id INTEGER NOT NULL,
-        chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
-        start_elapsed_us INTEGER NOT NULL CHECK(start_elapsed_us >= 0),
-        end_elapsed_us INTEGER NOT NULL CHECK(end_elapsed_us >= start_elapsed_us),
-        sample_count INTEGER NOT NULL CHECK(sample_count > 0),
+        chunk_index INTEGER NOT NULL,
+        start_elapsed_us INTEGER NOT NULL,
+        end_elapsed_us INTEGER NOT NULL,
+        sample_count INTEGER NOT NULL,
         encoding_version INTEGER NOT NULL DEFAULT 1,
         signal_data BLOB NOT NULL,
         FOREIGN KEY(recording_id)
@@ -488,27 +454,14 @@ class RecordingExportService {
       CREATE TABLE recording_gaps (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recording_id INTEGER NOT NULL,
-        start_elapsed_us INTEGER NOT NULL CHECK(start_elapsed_us >= 0),
+        start_elapsed_us INTEGER NOT NULL,
         end_elapsed_us INTEGER,
         reason TEXT NOT NULL,
         details TEXT,
         FOREIGN KEY(recording_id)
           REFERENCES recordings(id)
-          ON DELETE CASCADE,
-        CHECK(
-          end_elapsed_us IS NULL OR end_elapsed_us >= start_elapsed_us
-        )
+          ON DELETE CASCADE
       )
-    ''');
-
-    await db.execute('''
-      CREATE INDEX idx_recordings_started_at
-      ON recordings(started_at_ms DESC)
-    ''');
-
-    await db.execute('''
-      CREATE INDEX idx_recordings_status
-      ON recordings(status)
     ''');
 
     await db.execute('''
@@ -517,23 +470,9 @@ class RecordingExportService {
     ''');
 
     await db.execute('''
-      CREATE INDEX idx_signal_chunks_recording_end
-      ON signal_chunks(recording_id, end_elapsed_us)
-    ''');
-
-    await db.execute('''
       CREATE INDEX idx_recording_gaps_recording_start
       ON recording_gaps(recording_id, start_elapsed_us)
     ''');
-  }
-
-  String _mimeType(RecordingExportFormat format) {
-    switch (format) {
-      case RecordingExportFormat.apex:
-        return 'application/vnd.sqlite3';
-      case RecordingExportFormat.csv:
-        return 'text/csv';
-    }
   }
 
   String _safeFileName(String value) {
@@ -556,51 +495,14 @@ class RecordingExportService {
   String _shortUid(String uid) {
     final cleaned = uid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
 
+    if (cleaned.isEmpty) {
+      return 'recording';
+    }
+
     if (cleaned.length <= 10) {
-      return cleaned.isEmpty ? 'recording' : cleaned;
+      return cleaned;
     }
 
     return cleaned.substring(cleaned.length - 10);
-  }
-
-  Uint8List? _asUint8List(Object? value) {
-    if (value is Uint8List) {
-      return value;
-    }
-
-    if (value is List<int>) {
-      return Uint8List.fromList(value);
-    }
-
-    return null;
-  }
-
-  Future<void> cleanupTemporaryExports({
-    Duration olderThan = const Duration(days: 1),
-  }) async {
-    final tempDirectory = await getTemporaryDirectory();
-    final exportDirectory = Directory(
-      p.join(tempDirectory.path, 'apexcardio_exports'),
-    );
-
-    if (!await exportDirectory.exists()) {
-      return;
-    }
-
-    final threshold = DateTime.now().subtract(olderThan);
-
-    await for (final entity in exportDirectory.list()) {
-      if (entity is! File) {
-        continue;
-      }
-
-      try {
-        final stat = await entity.stat();
-
-        if (stat.modified.isBefore(threshold)) {
-          await entity.delete();
-        }
-      } catch (_) {}
-    }
   }
 }

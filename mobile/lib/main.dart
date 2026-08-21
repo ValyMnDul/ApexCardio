@@ -97,15 +97,19 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 68,
         centerTitle: true,
+        titleSpacing: 12,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.graphic_eq, color: Colors.teal[800], size: 30),
-            const SizedBox(width: 10),
             Text.rich(
               TextSpan(
-                style: const TextStyle(fontFamily: 'Poppins', fontSize: 22),
+                style: const TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 21,
+                  height: 1,
+                ),
                 children: [
                   TextSpan(
                     text: 'APEX',
@@ -113,37 +117,51 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                       fontWeight: FontWeight.w400,
                       color: themeProvider.darkmode
                           ? Colors.teal[100]
-                          : Colors.grey[800],
+                          : Colors.grey[850],
                     ),
                   ),
                   TextSpan(
                     text: ' CARDIO',
                     style: TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: Colors.teal[800],
+                      fontWeight: FontWeight.w600,
+                      color: Colors.teal[700],
                     ),
                   ),
                 ],
               ),
             ),
+            Consumer<RecordingProvider>(
+              builder: (context, recording, child) {
+                if (!recording.hasActiveRecording) {
+                  return const SizedBox.shrink();
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: _AppRecordingDot(
+                    active: recording.isRecording && recording.bleConnected,
+                    paused: recording.isPaused || !recording.bleConnected,
+                  ),
+                );
+              },
+            ),
           ],
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: [
-            Tab(
-              icon: const Icon(Icons.favorite),
-              text: languageProvider.translate("live_tab"),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(44),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: TabBar(
+              controller: _tabController,
+              dividerColor: Colors.transparent,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+              tabs: [
+                Tab(text: languageProvider.translate('live_tab')),
+                Tab(text: languageProvider.translate('recordings_tab')),
+                Tab(text: languageProvider.translate('settings_tab')),
+              ],
             ),
-            Tab(
-              icon: const Icon(Icons.folder),
-              text: languageProvider.translate("recordings_tab"),
-            ),
-            Tab(
-              icon: const Icon(Icons.settings),
-              text: languageProvider.translate("settings_tab"),
-            ),
-          ],
+          ),
         ),
       ),
       body: TabBarView(
@@ -156,6 +174,95 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           const Settings(),
         ],
       ),
+    );
+  }
+}
+
+class _AppRecordingDot extends StatefulWidget {
+  final bool active;
+  final bool paused;
+
+  const _AppRecordingDot({required this.active, required this.paused});
+
+  @override
+  State<_AppRecordingDot> createState() => _AppRecordingDotState();
+}
+
+class _AppRecordingDotState extends State<_AppRecordingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 950),
+    );
+
+    if (widget.active) {
+      _controller.repeat(reverse: true);
+    }
+
+    _scale = Tween<double>(
+      begin: 0.90,
+      end: 1.16,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+
+    _opacity = Tween<double>(
+      begin: 1,
+      end: 0.48,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void didUpdateWidget(covariant _AppRecordingDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.active != widget.active) {
+      if (widget.active) {
+        _controller.repeat(reverse: true);
+      } else {
+        _controller
+          ..stop()
+          ..value = 0;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dotColor = widget.paused
+        ? Theme.of(context).colorScheme.tertiary
+        : const Color(0xFFE74C4C);
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Opacity(
+          opacity: widget.active ? _opacity.value : 1,
+          child: Transform.scale(
+            scale: widget.active ? _scale.value : 1,
+            child: Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: dotColor,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
