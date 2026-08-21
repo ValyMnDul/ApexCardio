@@ -228,6 +228,14 @@ class RecordingAnalysisService {
 
     if (timelineUs <= safeWindowUs) {
       starts.add(0);
+    } else if (timelineUs <=
+        safeWindowUs * desiredCount) {
+      var start = 0;
+
+      while (start < timelineUs) {
+        starts.add(start);
+        start += safeWindowUs;
+      }
     } else {
       final availableStart =
           timelineUs - safeWindowUs;

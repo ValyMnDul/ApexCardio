@@ -42,9 +42,9 @@ class _RecordingViewerState extends State<RecordingViewer> {
 
   int _timelineDurationUs = 0;
   int _windowStartUs = 0;
-  int _windowDurationUs = 10 * 1000000;
+  int _windowDurationUs = 20 * 1000000;
   int _intervalBaseStartUs = 0;
-  int _intervalBaseDurationUs = 10 * 1000000;
+  int _intervalBaseDurationUs = 20 * 1000000;
 
   double _sampleRate = 250.0;
 
@@ -676,8 +676,6 @@ class _RecordingViewerState extends State<RecordingViewer> {
               _timelineDurationUs,
           startUs:
               _windowStartUs,
-          endUs:
-              _windowEndUs,
           maximumIntervalUs:
               _maximumDetailedWindowUs,
         );
@@ -1796,13 +1794,11 @@ class _IntervalPickerSheet
     extends StatefulWidget {
   final int timelineUs;
   final int startUs;
-  final int endUs;
   final int maximumIntervalUs;
 
   const _IntervalPickerSheet({
     required this.timelineUs,
     required this.startUs,
-    required this.endUs,
     required this.maximumIntervalUs,
   });
 
@@ -1814,10 +1810,6 @@ class _IntervalPickerSheet
 class _IntervalPickerSheetState
     extends State<_IntervalPickerSheet> {
   late int _startSeconds;
-  late int _endSeconds;
-  _IntervalEdge _edge =
-      _IntervalEdge.start;
-  String? _errorKey;
 
   @override
   void initState() {
@@ -1826,46 +1818,42 @@ class _IntervalPickerSheetState
     _startSeconds =
         widget.startUs ~/
         Duration.microsecondsPerSecond;
-
-    _endSeconds =
-        math.max(
-      _startSeconds + 1,
-      widget.endUs ~/
-          Duration.microsecondsPerSecond,
-    );
   }
+
+  int get _timelineSeconds =>
+      math.max(
+        0,
+        widget.timelineUs ~/
+            Duration.microsecondsPerSecond,
+      );
+
+  int get _maximumStartSeconds =>
+      math.max(
+        0,
+        _timelineSeconds - 1,
+      );
+
+  int get _endSeconds =>
+      math.min(
+        _timelineSeconds,
+        _startSeconds +
+            widget.maximumIntervalUs ~/
+                Duration.microsecondsPerSecond,
+      );
 
   void _apply() {
     final startUs =
         _startSeconds *
         Duration.microsecondsPerSecond;
+
     final endUs =
-        _endSeconds *
-        Duration.microsecondsPerSecond;
+        math.min(
+      widget.timelineUs,
+      startUs +
+          widget.maximumIntervalUs,
+    );
 
     if (endUs <= startUs) {
-      setState(() {
-        _errorKey =
-            "end_after_start";
-      });
-      return;
-    }
-
-    if (endUs >
-        widget.timelineUs) {
-      setState(() {
-        _errorKey =
-            "end_outside_recording";
-      });
-      return;
-    }
-
-    if (endUs - startUs >
-        widget.maximumIntervalUs) {
-      setState(() {
-        _errorKey =
-            "interval_too_long";
-      });
       return;
     }
 
@@ -1882,16 +1870,6 @@ class _IntervalPickerSheetState
   Widget build(BuildContext context) {
     final language =
         context.watch<LanguageProvider>();
-    final maxSeconds = math.max(
-      0,
-      widget.timelineUs ~/
-          Duration.microsecondsPerSecond,
-    );
-
-    final current =
-        _edge == _IntervalEdge.start
-            ? _startSeconds
-            : _endSeconds;
 
     return SafeArea(
       top: false,
@@ -1925,15 +1903,28 @@ class _IntervalPickerSheetState
             ),
             const SizedBox(height: 8),
             Text(
-              '${language.translate(
-                "recording_length",
-                <String, Object?>{
-                  "duration":
-                      _formatPickerDuration(
-                    maxSeconds,
-                  ),
-                },
-              )} · 20 s max',
+              '${_formatPickerDuration(_startSeconds)}  →  ${_formatPickerDuration(_endSeconds)}',
+              textAlign:
+                  TextAlign.center,
+              style:
+                  Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(
+                        fontWeight:
+                            FontWeight.w600,
+                        fontFeatures:
+                            const [
+                          FontFeature
+                              .tabularFigures(),
+                        ],
+                      ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              language.translate(
+                "max_graph_interval",
+              ),
               textAlign:
                   TextAlign.center,
               style:
@@ -1941,97 +1932,29 @@ class _IntervalPickerSheetState
                       .textTheme
                       .bodySmall
                       ?.copyWith(
-                        color: Theme.of(
-                          context,
-                        )
-                            .colorScheme
-                            .onSurfaceVariant,
+                        color:
+                            Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                       ),
             ),
             const SizedBox(height: 14),
-            CupertinoSlidingSegmentedControl<
-                _IntervalEdge>(
-              groupValue: _edge,
-              children: {
-                _IntervalEdge.start:
-                    Padding(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 7,
-                  ),
-                  child: Text(
-                    '${language.translate("start")}  ${_formatPickerDuration(_startSeconds)}',
-                    maxLines: 1,
-                  ),
-                ),
-                _IntervalEdge.end:
-                    Padding(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 7,
-                  ),
-                  child: Text(
-                    '${language.translate("end")}  ${_formatPickerDuration(_endSeconds)}',
-                    maxLines: 1,
-                  ),
-                ),
-              },
-              onValueChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-
-                setState(() {
-                  _edge = value;
-                  _errorKey = null;
-                });
-              },
-            ),
-            const SizedBox(height: 12),
             SizedBox(
-              height: 176,
+              height: 184,
               child: _DurationWheelPicker(
-                key: ValueKey(
-                  _edge,
-                ),
-                valueSeconds: current,
+                valueSeconds:
+                    _startSeconds,
                 maximumSeconds:
-                    maxSeconds,
+                    _maximumStartSeconds,
                 onChanged: (value) {
                   setState(() {
-                    if (_edge ==
-                        _IntervalEdge.start) {
-                      _startSeconds =
-                          value;
-                    } else {
-                      _endSeconds =
-                          value;
-                    }
-
-                    _errorKey = null;
+                    _startSeconds =
+                        value;
                   });
                 },
               ),
             ),
-            if (_errorKey != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                language.translate(
-                  _errorKey!,
-                ),
-                textAlign:
-                    TextAlign.center,
-                style: TextStyle(
-                  color:
-                      Theme.of(context)
-                          .colorScheme
-                          .error,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
@@ -2054,9 +1977,14 @@ class _IntervalPickerSheetState
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: FilledButton(
-                    onPressed: _apply,
-                    child: FittedBox(
+                  child:
+                      FilledButton(
+                    onPressed:
+                        _timelineSeconds <= 0
+                            ? null
+                            : _apply,
+                    child:
+                        FittedBox(
                       fit:
                           BoxFit.scaleDown,
                       child: Text(

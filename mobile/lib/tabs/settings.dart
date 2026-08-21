@@ -414,8 +414,11 @@ class _SettingsState extends State<Settings> {
                           .isConnected
                       ? TextButton(
                           onPressed:
-                              bleProvider
-                                  .disconnect,
+                              recordingProvider
+                                      .hasActiveRecording
+                                  ? null
+                                  : bleProvider
+                                      .disconnect,
                           child: Text(
                             languageProvider
                                 .translate(
@@ -443,6 +446,45 @@ class _SettingsState extends State<Settings> {
                 ),
               ),
             ),
+          ),
+          Divider(
+            height: 18,
+            color: scheme.outlineVariant,
+          ),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "device_behavior",
+            ),
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.sync_rounded,
+            label: languageProvider.translate(
+              "auto_reconnect",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "auto_reconnect_desc",
+            ),
+            value:
+                bleProvider.autoReconnectEnabled,
+            onChanged:
+                bleProvider
+                    .setAutoReconnectEnabled,
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.filter_alt_outlined,
+            label: languageProvider.translate(
+              "apex_only",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "apex_only_desc",
+            ),
+            value:
+                bleProvider.showOnlyApexDevices,
+            onChanged:
+                bleProvider
+                    .setShowOnlyApexDevices,
           ),
           Divider(
             height: 18,
@@ -589,12 +631,14 @@ class _SettingsSwitchRow
     extends StatelessWidget {
   final IconData icon;
   final String label;
+  final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
   const _SettingsSwitchRow({
     required this.icon,
     required this.label,
+    this.subtitle,
     required this.value,
     required this.onChanged,
   });
@@ -620,6 +664,15 @@ class _SettingsSwitchRow
           overflow:
               TextOverflow.ellipsis,
         ),
+        subtitle:
+            subtitle == null
+                ? null
+                : Text(
+                    subtitle!,
+                    maxLines: 2,
+                    overflow:
+                        TextOverflow.ellipsis,
+                  ),
         trailing: Switch(
           value: value,
           onChanged: onChanged,

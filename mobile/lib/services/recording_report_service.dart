@@ -240,7 +240,7 @@ class RecordingReportService {
       timelineUs: timelineUs,
       sampleRate: sampleRate,
       desiredCount: 8,
-      windowUs: 2500000,
+      windowUs: 20000000,
     );
 
     final respirationExcerpts =
@@ -249,7 +249,7 @@ class RecordingReportService {
       timelineUs: timelineUs,
       sampleRate: sampleRate,
       desiredCount: 6,
-      windowUs: 5000000,
+      windowUs: 20000000,
     );
 
     final ecgStats =
@@ -613,6 +613,7 @@ class RecordingReportService {
         channel:
             _ReportChannel.ecg,
         color: red,
+        graphColor: '#D94848',
         teal: teal,
         muted: muted,
         line: line,
@@ -686,6 +687,7 @@ class RecordingReportService {
         channel:
             _ReportChannel.respiration,
         color: teal,
+        graphColor: '#0F766E',
         teal: teal,
         muted: muted,
         line: line,
@@ -755,6 +757,7 @@ class RecordingReportService {
         excerpts,
     required _ReportChannel channel,
     required PdfColor color,
+    required String graphColor,
     required PdfColor teal,
     required PdfColor muted,
     required PdfColor line,
@@ -834,6 +837,7 @@ class RecordingReportService {
                 startedAtMs:
                     startedAtMs,
                 color: color,
+                graphColor: graphColor,
                 muted: muted,
                 line: line,
                 language: language,
@@ -881,6 +885,7 @@ class RecordingReportService {
     required List<double> values,
     required int startedAtMs,
     required PdfColor color,
+    required String graphColor,
     required PdfColor muted,
     required PdfColor line,
     required _ReportLanguage language,
@@ -971,9 +976,7 @@ class RecordingReportService {
                         _signalSvg(
                       values,
                       color:
-                          _pdfColorHex(
-                        color,
-                      ),
+                          graphColor,
                     ),
                     fit:
                         pw.BoxFit.fill,
@@ -1230,34 +1233,6 @@ class RecordingReportService {
     return output;
   }
 
-  String _pdfColorHex(
-    PdfColor color,
-  ) {
-    final r =
-        (color.red * 255)
-            .round()
-            .clamp(0, 255)
-            .toInt();
-    final g =
-        (color.green * 255)
-            .round()
-            .clamp(0, 255)
-            .toInt();
-    final b =
-        (color.blue * 255)
-            .round()
-            .clamp(0, 255)
-            .toInt();
-
-    String two(
-      int value,
-    ) =>
-        value
-            .toRadixString(16)
-            .padLeft(2, '0');
-
-    return '#${two(r)}${two(g)}${two(b)}';
-  }
 
   pw.Widget _vital({
     required String value,

@@ -9,6 +9,7 @@ import '../providers/language.dart';
 import '../screens/recording_viewer.dart';
 import '../services/recording_database.dart';
 import '../services/recording_import_service.dart';
+import '../services/recording_report_service.dart';
 
 class Recordings extends StatefulWidget {
   const Recordings({super.key});
@@ -559,6 +560,297 @@ class _RecordingsState extends State<Recordings> {
           recordingId: recordingId,
         ),
       ),
+    );
+
+    await _reloadRecordings();
+  }
+
+  Rect? _shareOrigin() {
+    final box =
+        context.findRenderObject()
+            as RenderBox?;
+
+    if (box == null ||
+        !box.hasSize) {
+      return null;
+    }
+
+    return box.localToGlobal(
+          Offset.zero,
+        ) &
+        box.size;
+  }
+
+  Future<void> _shareRecordingPdf(
+    int recordingId,
+  ) async {
+    final language =
+        context.read<LanguageProvider>();
+
+    try {
+      await RecordingReportService.instance.shareReport(
+        recordingId: recordingId,
+        languageCode:
+            language.currentLang,
+        sharePositionOrigin:
+            _shareOrigin(),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage(
+        language.translate(
+          "action_failed",
+          <String, Object?>{
+            "error": error,
+          },
+        ),
+      );
+    }
+  }
+
+  Future<void> _editRecording(
+    Map<String, Object?> row,
+  ) async {
+    final recordingId =
+        row['id'] as int;
+
+    final recordingProvider =
+        context.read<RecordingProvider>();
+
+    if (recordingProvider.recordingId ==
+        recordingId) {
+      _showMessage(
+        context
+            .read<LanguageProvider>()
+            .translate(
+              "stop_before_delete",
+            ),
+      );
+      return;
+    }
+
+    final language =
+        context.read<LanguageProvider>();
+
+    final nameController =
+        TextEditingController(
+      text:
+          row['name'] as String? ??
+          language.translate(
+            "recording",
+          ),
+    );
+
+    final notesController =
+        TextEditingController(
+      text:
+          row['notes'] as String? ??
+          '',
+    );
+
+    final save =
+        await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final media =
+            MediaQuery.of(
+          dialogContext,
+        );
+
+        return Dialog(
+          insetPadding:
+              const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          child: SizedBox(
+            width:
+                (media.size.width - 32)
+                    .clamp(
+                      0.0,
+                      420.0,
+                    )
+                    .toDouble(),
+            height:
+                (media.size.height - 80)
+                    .clamp(
+                      300.0,
+                      390.0,
+                    )
+                    .toDouble(),
+            child: Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(
+                20,
+                18,
+                20,
+                14,
+              ),
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .stretch,
+                children: [
+                  Text(
+                    language.translate(
+                      "edit_recording",
+                    ),
+                    textAlign:
+                        TextAlign.center,
+                    style:
+                        Theme.of(
+                      dialogContext,
+                    )
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(
+                              fontWeight:
+                                  FontWeight
+                                      .w600,
+                            ),
+                  ),
+                  const SizedBox(
+                    height: 16,
+                  ),
+                  TextField(
+                    controller:
+                        nameController,
+                    maxLines: 1,
+                    decoration:
+                        InputDecoration(
+                      labelText:
+                          language.translate(
+                        "recording_name",
+                      ),
+                    ),
+                  ),
+                  const SizedBox(
+                    height: 14,
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller:
+                          notesController,
+                      expands: true,
+                      minLines: null,
+                      maxLines: null,
+                      textAlignVertical:
+                          TextAlignVertical
+                              .top,
+                      decoration:
+                          InputDecoration(
+                        labelText:
+                            language.translate(
+                          "notes",
+                        ),
+                        hintText:
+                            language.translate(
+                          "optional",
+                        ),
+                        alignLabelWithHint:
+                            true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child:
+                            TextButton(
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                              false,
+                            );
+                          },
+                          child:
+                              FittedBox(
+                            fit:
+                                BoxFit
+                                    .scaleDown,
+                            child: Text(
+                              language
+                                  .translate(
+                                "cancel",
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(
+                        width: 8,
+                      ),
+                      Expanded(
+                        child:
+                            FilledButton(
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                              true,
+                            );
+                          },
+                          child:
+                              FittedBox(
+                            fit:
+                                BoxFit
+                                    .scaleDown,
+                            child: Text(
+                              language
+                                  .translate(
+                                "save",
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (save != true) {
+      nameController.dispose();
+      notesController.dispose();
+      return;
+    }
+
+    final name =
+        nameController.text
+            .trim();
+
+    final notes =
+        notesController.text
+            .trim();
+
+    nameController.dispose();
+    notesController.dispose();
+
+    await _database.updateRecordingDetails(
+      recordingId:
+          recordingId,
+      name: name.isEmpty
+          ? language.translate(
+              "recording",
+            )
+          : name,
+      notes:
+          notes.isEmpty
+              ? null
+              : notes,
+      replaceNotes: true,
+      replaceMetadata: true,
+      metadataJson: null,
     );
 
     await _reloadRecordings();
@@ -1242,6 +1534,16 @@ class _RecordingsState extends State<Recordings> {
               onTap: () {
                 _openRecording(row['id'] as int);
               },
+              onEdit: () {
+                _editRecording(
+                  row,
+                );
+              },
+              onPdf: () {
+                _shareRecordingPdf(
+                  row['id'] as int,
+                );
+              },
               onDelete: () {
                 _deleteRecording(
                   row['id'] as int,
@@ -1271,13 +1573,16 @@ class _CreateRecordingData {
   });
 }
 
-class _RecordingTile extends StatelessWidget {
+class _RecordingTile
+    extends StatefulWidget {
   final Map<String, Object?> row;
   final String Function(int milliseconds)
       formatDateTime;
   final String Function(int microseconds)
       formatDuration;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onPdf;
   final VoidCallback onDelete;
 
   const _RecordingTile({
@@ -1285,8 +1590,19 @@ class _RecordingTile extends StatelessWidget {
     required this.formatDateTime,
     required this.formatDuration,
     required this.onTap,
+    required this.onEdit,
+    required this.onPdf,
     required this.onDelete,
   });
+
+  @override
+  State<_RecordingTile> createState() =>
+      _RecordingTileState();
+}
+
+class _RecordingTileState
+    extends State<_RecordingTile> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1295,23 +1611,33 @@ class _RecordingTile extends StatelessWidget {
     final language =
         context.watch<LanguageProvider>();
 
+    final row = widget.row;
+
     final name =
         row['name'] as String? ??
         language.translate(
           "recording",
         );
+
     final startedAtMs =
-        row['started_at_ms'] as int? ?? 0;
+        row['started_at_ms'] as int? ??
+        0;
+
     final timelineUs =
-        row['timeline_duration_us'] as int? ?? 0;
+        row['timeline_duration_us']
+            as int? ??
+        0;
+
     final recordedSamples =
         row['recorded_sample_count']
             as int? ??
         0;
+
     final sampleRate =
         (row['sample_rate'] as num?)
                 ?.toDouble() ??
             250.0;
+
     final status =
         row['status'] as String? ??
         'completed';
@@ -1327,152 +1653,278 @@ class _RecordingTile extends StatelessWidget {
           scheme.surfaceContainer,
       borderRadius:
           BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius:
-            BorderRadius.circular(14),
-        child: Container(
-          padding:
-              const EdgeInsets.fromLTRB(
-            14,
-            13,
-            6,
-            13,
+      clipBehavior:
+          Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius:
+              BorderRadius.circular(14),
+          border: Border.all(
+            color:
+                scheme.outlineVariant,
           ),
-          decoration: BoxDecoration(
-            borderRadius:
-                BorderRadius.circular(14),
-            border: Border.all(
-              color:
-                  scheme.outlineVariant,
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 7,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius:
-                      BorderRadius.circular(
-                    8,
-                  ),
-                  color: _statusColor(
-                    context,
-                    status,
-                  ),
+        ),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: widget.onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.fromLTRB(
+                  14,
+                  13,
+                  4,
+                  13,
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
-                      style:
-                          Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(
-                                fontWeight:
-                                    FontWeight
-                                        .w600,
-                              ),
-                    ),
-                    const SizedBox(
-                      height: 4,
-                    ),
-                    Text(
-                      formatDateTime(
-                        startedAtMs,
+                    Container(
+                      width: 7,
+                      height: 38,
+                      decoration:
+                          BoxDecoration(
+                        borderRadius:
+                            BorderRadius
+                                .circular(
+                          8,
+                        ),
+                        color:
+                            _statusColor(
+                          context,
+                          status,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
-                      style:
-                          Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: scheme
-                                    .onSurfaceVariant,
-                              ),
                     ),
                     const SizedBox(
-                      height: 5,
+                      width: 12,
                     ),
-                    Text(
-                      '${formatDuration(timelineUs)}  ·  '
-                      '${language.translate(
-                        "measured",
-                        <String, Object?>{
-                          "duration":
-                              _formatMeasured(
-                            measuredSeconds,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+                        children: [
+                          Text(
+                            name,
+                            maxLines: 1,
+                            overflow:
+                                TextOverflow
+                                    .ellipsis,
+                            style:
+                                Theme.of(
+                              context,
+                            )
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      fontWeight:
+                                          FontWeight
+                                              .w600,
+                                    ),
                           ),
-                        },
-                      )}  ·  '
-                      '${sampleRate.toStringAsFixed(0)} Hz'
-                      '${status == "completed" ? "" : "  ·  ${_statusLabel(language, status)}"}',
-                      maxLines: 2,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
-                      style:
-                          Theme.of(context)
-                              .textTheme
-                              .labelSmall
-                              ?.copyWith(
-                                color: scheme
-                                    .onSurfaceVariant,
-                              ),
+                          const SizedBox(
+                            height: 4,
+                          ),
+                          Text(
+                            widget
+                                .formatDateTime(
+                              startedAtMs,
+                            ),
+                            maxLines: 1,
+                            overflow:
+                                TextOverflow
+                                    .ellipsis,
+                            style:
+                                Theme.of(
+                              context,
+                            )
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color:
+                                          scheme
+                                              .onSurfaceVariant,
+                                    ),
+                          ),
+                          const SizedBox(
+                            height: 5,
+                          ),
+                          Text(
+                            '${widget.formatDuration(timelineUs)}  ·  '
+                            '${language.translate(
+                              "measured",
+                              <String, Object?>{
+                                "duration":
+                                    _formatMeasured(
+                                  measuredSeconds,
+                                ),
+                              },
+                            )}  ·  '
+                            '${sampleRate.toStringAsFixed(0)} Hz'
+                            '${status == "completed" ? "" : "  ·  ${_statusLabel(language, status)}"}',
+                            maxLines: 2,
+                            overflow:
+                                TextOverflow
+                                    .ellipsis,
+                            style:
+                                Theme.of(
+                              context,
+                            )
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color:
+                                          scheme
+                                              .onSurfaceVariant,
+                                    ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip:
+                          language.translate(
+                        "more",
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _expanded =
+                              !_expanded;
+                        });
+                      },
+                      icon:
+                          AnimatedRotation(
+                        turns:
+                            _expanded
+                                ? 0.5
+                                : 0,
+                        duration:
+                            const Duration(
+                          milliseconds:
+                              180,
+                        ),
+                        child: const Icon(
+                          Icons
+                              .keyboard_arrow_down_rounded,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                tooltip:
-                    language.translate(
-                  "recording_options",
-                ),
-                onSelected: (value) {
-                  if (value ==
-                      'delete') {
-                    onDelete();
-                  }
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
+            ),
+            AnimatedSize(
+              duration:
+                  const Duration(
+                milliseconds: 180,
+              ),
+              curve:
+                  Curves.easeOutCubic,
+              child: _expanded
+                  ? Column(
                       children: [
-                        const Icon(
-                          Icons
-                              .delete_outline_rounded,
+                        Divider(
+                          height: 1,
+                          color: scheme
+                              .outlineVariant,
                         ),
-                        const SizedBox(
-                          width: 10,
-                        ),
-                        Text(
-                          language
-                              .translate(
-                            "delete",
+                        Padding(
+                          padding:
+                              const EdgeInsets
+                                  .fromLTRB(
+                            8,
+                            5,
+                            8,
+                            6,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child:
+                                    TextButton.icon(
+                                  onPressed:
+                                      widget.onEdit,
+                                  icon: const Icon(
+                                    Icons
+                                        .edit_outlined,
+                                    size: 18,
+                                  ),
+                                  label:
+                                      FittedBox(
+                                    fit: BoxFit
+                                        .scaleDown,
+                                    child:
+                                        Text(
+                                      language
+                                          .translate(
+                                        "edit",
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child:
+                                    TextButton.icon(
+                                  onPressed:
+                                      widget.onPdf,
+                                  icon: const Icon(
+                                    Icons
+                                        .picture_as_pdf_outlined,
+                                    size: 18,
+                                  ),
+                                  label:
+                                      const FittedBox(
+                                    fit: BoxFit
+                                        .scaleDown,
+                                    child:
+                                        Text(
+                                      'PDF',
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child:
+                                    TextButton.icon(
+                                  onPressed:
+                                      widget
+                                          .onDelete,
+                                  icon: Icon(
+                                    Icons
+                                        .delete_outline_rounded,
+                                    size: 18,
+                                    color: scheme
+                                        .error,
+                                  ),
+                                  label:
+                                      FittedBox(
+                                    fit: BoxFit
+                                        .scaleDown,
+                                    child:
+                                        Text(
+                                      language
+                                          .translate(
+                                        "delete",
+                                      ),
+                                      style:
+                                          TextStyle(
+                                        color:
+                                            scheme
+                                                .error,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
       ),
     );
@@ -1498,7 +1950,9 @@ class _RecordingTile extends StatelessWidget {
     final secs =
         totalSeconds % 60;
 
-    String two(int value) =>
+    String two(
+      int value,
+    ) =>
         value
             .toString()
             .padLeft(2, '0');
