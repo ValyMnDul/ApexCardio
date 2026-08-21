@@ -365,162 +365,6 @@ class _SettingsState extends State<Settings> {
           28,
         ),
         children: [
-          _SectionHeader(
-            label: languageProvider.translate(
-              "appearance_section",
-            ),
-          ),
-          _SettingsSwitchRow(
-            icon: themeProvider.darkmode
-                ? Icons.dark_mode_rounded
-                : Icons.light_mode_rounded,
-            label: languageProvider.translate(
-              "dark_mode",
-            ),
-            value:
-                themeProvider.darkmode,
-            onChanged:
-                themeProvider.setDarkMode,
-          ),
-          _SettingsSwitchRow(
-            icon: liveEcgProvider.showGrid
-                ? Icons.grid_on_rounded
-                : Icons.grid_off_rounded,
-            label: languageProvider.translate(
-              "show_grid_title",
-            ),
-            value:
-                liveEcgProvider.showGrid,
-            onChanged:
-                liveEcgProvider.toggleGrid,
-          ),
-          Divider(
-            height: 24,
-            color: scheme.outlineVariant,
-          ),
-          _SectionHeader(
-            label: languageProvider.translate(
-              "language_text_section",
-            ),
-          ),
-          _ChoiceSetting<String>(
-            title:
-                languageProvider.translate(
-              "language_title",
-            ),
-            values: const [
-              "EN",
-              "RO",
-              "DE",
-              "RU",
-              "ES",
-            ],
-            selected:
-                languageProvider.currentLang,
-            labelBuilder:
-                (value) => value,
-            onSelected:
-                languageProvider.setLanguage,
-          ),
-          const SizedBox(height: 18),
-          _ChoiceSetting<double>(
-            title:
-                languageProvider.translate(
-              "font_scale_title",
-            ),
-            values: const [
-              0.85,
-              1.0,
-              1.15,
-            ],
-            selected:
-                fontScaleProvider.fontScale,
-            labelBuilder: (value) {
-              if (value < 1) {
-                return languageProvider
-                    .translate(
-                  "font_scale_title_small",
-                );
-              }
-
-              if (value > 1) {
-                return languageProvider
-                    .translate(
-                  "font_scale_title_big",
-                );
-              }
-
-              return languageProvider
-                  .translate(
-                "font_scale_title_normal",
-              );
-            },
-            onSelected:
-                fontScaleProvider
-                    .setFontScale,
-          ),
-          Divider(
-            height: 28,
-            color: scheme.outlineVariant,
-          ),
-          _SectionHeader(
-            label: languageProvider.translate(
-              "ui_section",
-            ),
-          ),
-          _SettingsSwitchRow(
-            icon: Icons.circle_outlined,
-            label: languageProvider.translate(
-              "recording_indicator",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "recording_indicator_desc",
-            ),
-            value:
-                uiPreferences.showRecordingIndicator,
-            onChanged:
-                uiPreferences
-                    .setShowRecordingIndicator,
-          ),
-          _SettingsSwitchRow(
-            icon: Icons.animation_rounded,
-            label: languageProvider.translate(
-              "recording_indicator_animation",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "recording_indicator_animation_desc",
-            ),
-            value:
-                uiPreferences.animateRecordingIndicator,
-            onChanged:
-                uiPreferences
-                    .setAnimateRecordingIndicator,
-          ),
-          _SettingsSwitchRow(
-            icon: Icons.view_agenda_outlined,
-            label: languageProvider.translate(
-              "compact_recordings",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "compact_recordings_desc",
-            ),
-            value:
-                uiPreferences.compactRecordingList,
-            onChanged:
-                uiPreferences.setCompactRecordingList,
-          ),
-          Divider(
-            height: 28,
-            color: scheme.outlineVariant,
-          ),
-          _SectionHeader(
-            label: languageProvider.translate(
-              "connected_device",
-            ),
-          ),
           Padding(
             padding:
                 const EdgeInsets.symmetric(
@@ -606,43 +450,190 @@ class _SettingsState extends State<Settings> {
               ),
             ),
           ),
-          const SizedBox(height: 4),
+          _InsetDivider(
+            color:
+                scheme.outlineVariant,
+          ),
           _SectionHeader(
             label: languageProvider.translate(
-              "device_behavior",
+              "appearance_section",
             ),
           ),
           _SettingsSwitchRow(
-            icon: Icons.sync_rounded,
+            icon: themeProvider.darkmode
+                ? Icons.dark_mode_rounded
+                : Icons.light_mode_rounded,
             label: languageProvider.translate(
-              "auto_reconnect",
-            ),
-            subtitle:
-                languageProvider.translate(
-              "auto_reconnect_desc",
+              "dark_mode",
             ),
             value:
-                bleProvider.autoReconnectEnabled,
+                themeProvider.darkmode,
             onChanged:
-                bleProvider
-                    .setAutoReconnectEnabled,
+                themeProvider.setDarkMode,
           ),
           _SettingsSwitchRow(
-            icon: Icons.filter_alt_outlined,
+            icon: liveEcgProvider.showGrid
+                ? Icons.grid_on_rounded
+                : Icons.grid_off_rounded,
             label: languageProvider.translate(
-              "apex_only",
+              "show_grid_title",
+            ),
+            value:
+                liveEcgProvider.showGrid,
+            onChanged:
+                liveEcgProvider.toggleGrid,
+          ),
+          _InsetDivider(
+            color:
+                scheme.outlineVariant,
+          ),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "language_text_section",
+            ),
+          ),
+          _ChoiceSetting<String>(
+            title:
+                languageProvider.translate(
+              "language_title",
+            ),
+            values: const [
+              "EN",
+              "RO",
+              "DE",
+              "RU",
+              "ES",
+            ],
+            selected:
+                languageProvider.currentLang,
+            labelBuilder:
+                (value) => value,
+            onSelected:
+                languageProvider.setLanguage,
+          ),
+          const SizedBox(height: 18),
+          _ChoiceSetting<double>(
+            title:
+                languageProvider.translate(
+              "font_scale_title",
+            ),
+            values: const [
+              0.85,
+              1.0,
+              1.15,
+            ],
+            selected:
+                fontScaleProvider.fontScale,
+            labelBuilder: (value) {
+              if (value < 1) {
+                return languageProvider
+                    .translate(
+                  "font_scale_title_small",
+                );
+              }
+
+              if (value > 1) {
+                return languageProvider
+                    .translate(
+                  "font_scale_title_big",
+                );
+              }
+
+              return languageProvider
+                  .translate(
+                "font_scale_title_normal",
+              );
+            },
+            onSelected:
+                fontScaleProvider
+                    .setFontScale,
+          ),
+          _InsetDivider(
+            color:
+                scheme.outlineVariant,
+          ),
+          _SectionHeader(
+            label: languageProvider.translate(
+              "ui_section",
+            ),
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.circle_outlined,
+            label: languageProvider.translate(
+              "recording_indicator",
             ),
             subtitle:
                 languageProvider.translate(
-              "apex_only_desc",
+              "recording_indicator_desc",
             ),
             value:
-                bleProvider.showOnlyApexDevices,
+                uiPreferences
+                    .showRecordingIndicator,
             onChanged:
-                bleProvider
-                    .setShowOnlyApexDevices,
+                uiPreferences
+                    .setShowRecordingIndicator,
+          ),
+          _SettingsSwitchRow(
+            icon: Icons.animation_rounded,
+            label: languageProvider.translate(
+              "recording_indicator_animation",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "recording_indicator_animation_desc",
+            ),
+            value:
+                uiPreferences
+                    .animateRecordingIndicator,
+            onChanged:
+                uiPreferences
+                        .showRecordingIndicator
+                    ? uiPreferences
+                        .setAnimateRecordingIndicator
+                    : (_) {},
+          ),
+          _SettingsSwitchRow(
+            icon:
+                Icons.view_agenda_outlined,
+            label: languageProvider.translate(
+              "compact_recordings",
+            ),
+            subtitle:
+                languageProvider.translate(
+              "compact_recordings_desc",
+            ),
+            value:
+                uiPreferences
+                    .compactRecordingList,
+            onChanged:
+                uiPreferences
+                    .setCompactRecordingList,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _InsetDivider extends StatelessWidget {
+  final Color color;
+
+  const _InsetDivider({
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 8,
+      ),
+      child: Divider(
+        height: 1,
+        thickness: 1,
+        color: color,
       ),
     );
   }

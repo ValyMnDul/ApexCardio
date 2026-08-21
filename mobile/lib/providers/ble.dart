@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SensorSample {
   final double ecg;
@@ -57,7 +56,6 @@ class BleProvider extends ChangeNotifier {
   bool _isScanning = false;
 
   List<ScanResult> _scanResults = [];
-  List<ScanResult> _latestScanResults = [];
 
   StreamSubscription<List<int>>? _valueSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
@@ -69,11 +67,9 @@ class BleProvider extends ChangeNotifier {
   Timer? _reconnectRetryTimer;
 
   bool _manualDisconnect = false;
+  DateTime? _lastManualDisconnectAt;
   Future<bool>? _activationFuture;
   bool _autoReconnectArmed = false;
-  bool _autoReconnectEnabled = true;
-  bool _showOnlyApexDevices = false;
-  DateTime? _lastManualDisconnectAt;
   bool _restorationRunning = false;
   bool _disposed = false;
 
@@ -97,8 +93,6 @@ class BleProvider extends ChangeNotifier {
 
   bool get isConnected => _isConnected;
   bool get isScanning => _isScanning;
-  bool get autoReconnectEnabled => _autoReconnectEnabled;
-  bool get showOnlyApexDevices => _showOnlyApexDevices;
 
   List<ScanResult> get scanResults => _scanResults;
 
@@ -252,8 +246,6 @@ class BleProvider extends ChangeNotifier {
   int get heartBeatSerial => _heartBeatSerial;
 
   BleProvider() {
-    unawaited(_loadPreferences());
-
     _adapterStateSubscription =
         FlutterBluePlus.adapterState.listen((state) {
       if (state == BluetoothAdapterState.on) {
@@ -281,125 +273,14 @@ class BleProvider extends ChangeNotifier {
 
     _scanResultsSubscription =
         FlutterBluePlus.scanResults.listen((results) {
-      _latestScanResults =
-          List<ScanResult>.from(
-        results,
-        growable: false,
-      );
-      _scanResults =
-          _filterScanResults(
-        _latestScanResults,
-      );
+      _scanResults = results
+          .where((r) => r.device.platformName.isNotEmpty)
+          .toList();
+
       notifyListeners();
     });
 
     unawaited(_restoreOrReconnect());
-  }
-
-  Future<void> _loadPreferences() async {
-    try {
-      final prefs =
-          await SharedPreferences.getInstance();
-
-      _autoReconnectEnabled =
-          prefs.getBool(
-            'ble_auto_reconnect',
-          ) ??
-          true;
-
-      _showOnlyApexDevices =
-          prefs.getBool(
-            'ble_apex_only_v2',
-          ) ??
-          false;
-
-      if (!_disposed) {
-        notifyListeners();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> setAutoReconnectEnabled(
-    bool value,
-  ) async {
-    _autoReconnectEnabled = value;
-
-    if (!value) {
-      _reconnectRetryTimer?.cancel();
-      _autoReconnectArmed = false;
-    } else if (!_isConnected &&
-        _connectedDevice != null &&
-        !_manualDisconnect) {
-      _scheduleAutoReconnect(
-        _connectedDevice!,
-      );
-    }
-
-    notifyListeners();
-
-    try {
-      final prefs =
-          await SharedPreferences.getInstance();
-
-      await prefs.setBool(
-        'ble_auto_reconnect',
-        value,
-      );
-    } catch (_) {}
-  }
-
-  Future<void> setShowOnlyApexDevices(
-    bool value,
-  ) async {
-    _showOnlyApexDevices = value;
-
-    _scanResults =
-        _filterScanResults(
-      _latestScanResults,
-    );
-
-    notifyListeners();
-
-    try {
-      final prefs =
-          await SharedPreferences.getInstance();
-
-      await prefs.setBool(
-        'ble_apex_only_v2',
-        value,
-      );
-    } catch (_) {}
-  }
-
-  List<ScanResult> _filterScanResults(
-    List<ScanResult> results,
-  ) {
-    if (!_showOnlyApexDevices) {
-      return List<ScanResult>.from(
-        results,
-        growable: false,
-      );
-    }
-
-    return results.where((result) {
-      final name =
-          result.device.platformName
-              .trim()
-              .toLowerCase();
-
-      if (name.isEmpty) {
-        return true;
-      }
-
-      return name.contains(
-        'apexcardio',
-      ) ||
-      name.contains(
-        'apex cardio',
-      );
-    }).toList(
-      growable: false,
-    );
   }
 
   Future<void> startScan() async {
@@ -419,50 +300,18 @@ class BleProvider extends ChangeNotifier {
       }
     }
 
-    await stopScan();
-
-    final lastDisconnect =
-        _lastManualDisconnectAt;
-
-    if (lastDisconnect != null) {
-      final elapsed =
-          DateTime.now().difference(
-        lastDisconnect,
-      );
-
-      if (elapsed <
-          const Duration(
-            milliseconds: 650,
-          )) {
-        await Future<void>.delayed(
-          const Duration(
-            milliseconds: 650,
-          ) -
-              elapsed,
-        );
-      }
-    }
-
-    _latestScanResults = [];
     _scanResults.clear();
 
     notifyListeners();
 
-    await FlutterBluePlus.startScan(
-      timeout:
-          const Duration(
-        seconds: 8,
-      ),
-    );
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
   }
 
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
   }
 
-  Future<bool> connectToDevice(
-    BluetoothDevice device,
-  ) async {
+  Future<bool> connectToDevice(BluetoothDevice device) async {
     try {
       _manualDisconnect = false;
       _reconnectRetryTimer?.cancel();
@@ -470,22 +319,16 @@ class BleProvider extends ChangeNotifier {
 
       await stopScan();
 
-      final previous =
-          _connectedDevice;
-
-      if (previous != null) {
+      if (_connectedDevice != null &&
+          _connectedDevice != device) {
         await _detachCurrentDevice(
-          disconnectDevice:
-              previous != device &&
-              previous.isConnected,
+          disconnectDevice: true,
         );
       }
 
       _connectedDevice = device;
 
-      await _bindDeviceListeners(
-        device,
-      );
+      await _bindDeviceListeners(device);
 
       final lastDisconnect =
           _lastManualDisconnectAt;
@@ -498,11 +341,11 @@ class BleProvider extends ChangeNotifier {
 
         if (elapsed <
             const Duration(
-              milliseconds: 750,
+              milliseconds: 650,
             )) {
           await Future<void>.delayed(
             const Duration(
-              milliseconds: 750,
+              milliseconds: 650,
             ) -
                 elapsed,
           );
@@ -510,45 +353,20 @@ class BleProvider extends ChangeNotifier {
       }
 
       if (!device.isConnected) {
-        try {
-          await device.connect(
-            autoConnect: false,
-            license: License.nonprofit,
-          );
-        } catch (_) {
-          if (!device.isConnected) {
-            await Future<void>.delayed(
-              const Duration(
-                milliseconds: 450,
-              ),
-            );
-
-            await device.connect(
-              autoConnect: false,
-              license: License.nonprofit,
-            );
-          }
-        }
-      }
-
-      if (!device.isConnected) {
-        await Future<void>.delayed(
-          const Duration(
-            milliseconds: 180,
-          ),
+        await device.connect(
+          autoConnect: false,
+          license: License.nonprofit,
         );
       }
 
-      final activated =
-          await _activateDevice(
+      final activated = await _activateDevice(
         device,
         forceRediscovery: true,
       );
 
       if (!activated) {
         await _detachCurrentDevice(
-          disconnectDevice:
-              device.isConnected,
+          disconnectDevice: true,
         );
 
         return false;
@@ -582,7 +400,7 @@ class BleProvider extends ChangeNotifier {
 
       await Future<void>.delayed(
         const Duration(
-          milliseconds: 150,
+          milliseconds: 180,
         ),
       );
     } finally {
@@ -774,7 +592,6 @@ class BleProvider extends ChangeNotifier {
   ) {
     if (_disposed ||
         _manualDisconnect ||
-        !_autoReconnectEnabled ||
         _autoReconnectArmed ||
         _connectedDevice != device) {
       return;
@@ -797,7 +614,6 @@ class BleProvider extends ChangeNotifier {
   ) async {
     if (_disposed ||
         _manualDisconnect ||
-        !_autoReconnectEnabled ||
         _autoReconnectArmed ||
         _connectedDevice != device) {
       return;
@@ -820,7 +636,6 @@ class BleProvider extends ChangeNotifier {
       _autoReconnectArmed = false;
 
       if (!_manualDisconnect &&
-          _autoReconnectEnabled &&
           _connectedDevice == device) {
         _scheduleAutoReconnect(device);
       }
