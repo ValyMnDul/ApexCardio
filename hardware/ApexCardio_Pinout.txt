@@ -1,0 +1,98 @@
+ApexCardio Hardware Pinout
+Current ESP32 firmware pinout
+
+ESP32 to ADS1292R / CJMCU-1292
+GPIO18  -> SCK
+GPIO19  -> MISO
+GPIO23  -> MOSI
+GPIO5   -> CS
+GPIO22  -> DRDY
+GPIO4   -> START
+GPIO33  -> RESET / PWDN
+5V/VIN  -> VDD / 5V
+GND     -> GND
+
+ADS1292R SPI settings
+Clock: 100 kHz
+Bit order: MSB first
+SPI mode: MODE1
+
+
+ESP32 to OLED SH1106 128x64
+GPIO21  -> SDA
+GPIO25  -> SCL
+GND     -> GND
+VCC     -> OLED supply
+
+OLED interface: I2C
+OLED bus clock used by firmware: 800 kHz
+
+
+Current status LED
+GPIO2   -> Status LED
+
+Firmware behavior:
+GPIO2 HIGH -> BLE connected
+GPIO2 LOW  -> BLE disconnected
+
+
+RGB LED extension
+LED type: 5 mm RGB, common anode
+
+Common anode -> ESP32 3.3V
+Red cathode   -> 220-330 ohm resistor -> GPIO26
+Green cathode -> 220-330 ohm resistor -> GPIO27
+Blue cathode  -> 220-330 ohm resistor -> GPIO32
+
+For a common-anode RGB LED:
+GPIO LOW  -> color ON
+GPIO HIGH -> color OFF
+
+Note: GPIO26, GPIO27 and GPIO32 are free in the current main.cpp. The current firmware does not yet control the RGB LED on these pins.
+
+
+Power system
+Battery pack: 2 x 18650 Li-ion cells in parallel (1S2P)
+
+Battery pack + -> TP4056 B+
+Battery pack - -> TP4056 B-
+
+TP4056 OUT+ -> MT3608 input +
+TP4056 OUT- -> MT3608 input -
+
+MT3608 output adjusted to 5.0 V
+
+MT3608 output + -> ESP32 5V/VIN
+MT3608 output - -> ESP32 GND
+
+ESP32 5V/VIN -> CJMCU-1292 VDD / 5V
+ESP32 GND -> CJMCU-1292 GND
+ESP32 GND -> OLED GND
+
+All system grounds must be common.
+
+
+ECG electrode placement used during testing
+Red electrode    -> below the right clavicle
+Yellow electrode -> below the left clavicle
+Third electrode  -> lower-right torso / RLD reference
+
+The electrode cable connects to the CJMCU-1292 electrode input connector.
+
+
+GPIO summary
+GPIO2   -> Current status LED
+GPIO4   -> ADS1292R START
+GPIO5   -> ADS1292R CS
+GPIO18  -> ADS1292R SCK
+GPIO19  -> ADS1292R MISO
+GPIO21  -> OLED SDA
+GPIO22  -> ADS1292R DRDY
+GPIO23  -> ADS1292R MOSI
+GPIO25  -> OLED SCL
+GPIO33  -> ADS1292R RESET / PWDN
+
+Reserved for RGB extension:
+GPIO26  -> RGB Red
+GPIO27  -> RGB Green
+GPIO32  -> RGB Blue
