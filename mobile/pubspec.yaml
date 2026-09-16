@@ -36,11 +36,10 @@ flutter_launcher_icons:
   android: true
   ios: true
 
-  image_path_android: "assets/icons/apexcardio_light.png"
-
-  image_path_ios: "assets/icons/apexcardio_light.png"
-  image_path_ios_dark_transparent: "assets/icons/apexcardio_dark.png"
-  image_path_ios_tinted_grayscale: "assets/icons/apexcardio_tinted.png"
+  image_path_android: "assets/icons/ico.png"
+  image_path_ios: "assets/icons/ico.png"
+  image_path_ios_dark_transparent: "assets/icons/ico.png"
+  image_path_ios_tinted_grayscale: "assets/icons/ico.png"
 
   desaturate_tinted_to_grayscale_ios: false
   remove_alpha_ios: true
