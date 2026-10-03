@@ -2,6 +2,8 @@
 
 A portable cardiac and respiratory monitoring system built with an ESP32, ADS1292R and a Flutter mobile application.
 
+![Body](/assets/expedition (1).jpeg)
+
 ## Features
 
 - Real-time ECG monitoring
