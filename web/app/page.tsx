@@ -188,7 +188,7 @@ export default function Main() {
               </div>
               <div className="w-full pt-8">
                 <a 
-                  href="https://github.com/ValyMnDul/ApexCardio/releases/tag/1.0m"
+                  href="https://github.com/ValyMnDul/ApexCardio/releases/tag/1.0"
                   className="block w-full bg-gray-900 text-white py-4 rounded-lg font-semibold text-center hover:bg-gray-800 transition mb-3"
                 >
                   Download on App Store
