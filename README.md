@@ -2,7 +2,13 @@
 
 A portable cardiac and respiratory monitoring system built with an ESP32, ADS1292R and a Flutter mobile application.
 
-![Body](/assets/expedition (1).jpeg)
+![Body](/assets/body.jpeg)
+
+## Mobile App Screenshots
+
+![Body](/assets/rec.jpeg)
+![Body](/assets/settings.jpeg)
+![Body](/assets/live.jpeg)
 
 ## Features
 
